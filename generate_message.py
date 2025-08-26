@@ -1,21 +1,15 @@
 # generate_message.py
-# Pro-Version: Holt Live-Daten (Preis + Historie) von CoinGecko,
-# berechnet EMA50/EMA200 + RSI14 und baut eine saubere Telegram-Nachricht.
+# Holt Daten von CoinGecko, berechnet einfache Indikatoren (EMA50/EMA200, RSI14),
+# baut die Nachricht und schreibt sie nur dann in out_message.txt,
+# wenn sich mindestens EIN Signal gegenüber signal_state.json geändert hat.
 
-from __future__ import annotations
-import time
+import json, math, sys, time
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
-import requests
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
-# -------- Konfiguration -------------------------------------------------
-
-VS_CCY = "eur"
-RSI_LEN = 14
-EMA_FAST = 50
-EMA_SLOW = 200
-
-COINS: Dict[str, Tuple[str, str]] = {
+# === Coins: Ticker -> (coingecko-id, Anzeigename) ===
+COINS = {
     "BTC": ("bitcoin", "Bitcoin (BTC)"),
     "ETH": ("ethereum", "Ethereum (ETH)"),
     "SOL": ("solana", "Solana (SOL)"),
@@ -31,182 +25,162 @@ COINS: Dict[str, Tuple[str, str]] = {
     "SEI": ("sei-network", "Sei (SEI)"),
 }
 
-# -------- kleine Utils --------------------------------------------------
+STATE_FILE = "signal_state.json"
+OUT_FILE = "out_message.txt"
 
-def fmt_eur(x: float) -> str:
-    # €1.234,56 Format (ohne lokales Modul)
-    s = f"{x:,.2f}"
-    return "€" + s.replace(",", "X").replace(".", ",").replace("X", ".")
+# ---------- kleine Helfer ----------
 
-def http_get(url: str, params: dict | None = None, retries: int = 3, timeout: int = 25):
-    last_err = None
-    for _ in range(retries):
-        try:
-            r = requests.get(url, params=params, timeout=timeout)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            last_err = e
-            time.sleep(1.5)
-    raise last_err  # wenn alle Versuche scheitern
+def http_get_json(url: str):
+    req = Request(url, headers={"User-Agent": "signal-bot/1.0"})
+    with urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
 
-def ema(series: List[float], n: int) -> List[float]:
-    if not series or n <= 1:
-        return series[:]
-    k = 2 / (n + 1)
-    out = [series[0]]
-    for price in series[1:]:
-        out.append(price * k + out[-1] * (1 - k))
-    return out
+def ema(values, period):
+    k = 2 / (period + 1.0)
+    ema_val = None
+    for v in values:
+        ema_val = v if ema_val is None else (v - ema_val) * k + ema_val
+    return ema_val if ema_val is not None else float("nan")
 
-def rsi(series: List[float], length: int = 14) -> List[float]:
-    # klassischer Wilder-RSI
-    if len(series) < length + 1:
-        return [50.0] * len(series)
+def rsi(values, period=14):
+    # klassisches Wilder-RSI auf Schlusskursen (daily)
+    if len(values) < period + 1:
+        return float("nan")
     gains, losses = [], []
-    for i in range(1, len(series)):
-        chg = series[i] - series[i-1]
-        gains.append(max(chg, 0.0))
-        losses.append(abs(min(chg, 0.0)))
-    # erste Durchschnittswerte
-    avg_gain = sum(gains[:length]) / length
-    avg_loss = sum(losses[:length]) / length
-    rsis = [50.0] * (length)  # auffüllen bis erstes echtes RSI
-    # rest
-    for i in range(length, len(gains)):
-        avg_gain = (avg_gain * (length - 1) + gains[i]) / length
-        avg_loss = (avg_loss * (length - 1) + losses[i]) / length
-        if avg_loss == 0:
-            rs = float('inf')
-        else:
-            rs = avg_gain / avg_loss
-        rsis.append(100 - (100 / (1 + rs)))
-    # Länge angleichen
-    while len(rsis) < len(series):
-        rsis.insert(0, 50.0)
-    return rsis
+    for i in range(1, len(values)):
+        ch = values[i] - values[i-1]
+        gains.append(max(ch, 0))
+        losses.append(max(-ch, 0))
+    # Start mit Simple Moving Average
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    # Wilder Glättung
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
-# -------- Daten holen ---------------------------------------------------
+def euro(n):
+    s = f"€{n:,.2f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
-def fetch_snapshot(ids: List[str]) -> dict:
-    """aktuelle Preise + 24h-Änderung für alle Coins in einem Call"""
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {
-        "ids": ",".join(ids),
-        "vs_currencies": VS_CCY,
-        "include_24hr_change": "true",
-        "include_24hr_vol": "true",
-    }
-    return http_get(url, params)
+# ---------- Daten holen ----------
 
-def fetch_intraday_prices(cg_id: str) -> List[float]:
-    """Minütliche Preise (~24h) für EMA/RSI-Berechnung."""
-    url = f"https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart"
-    params = {"vs_currency": VS_CCY, "days": "1", "interval": "minute"}
-    data = http_get(url, params)
-    # data["prices"] = [[ts_ms, price], ...]
-    return [p[1] for p in data.get("prices", [])]
+def fetch_spot(ids):
+    url = (
+        "https://api.coingecko.com/api/v3/simple/price"
+        f"?ids={','.join(ids)}&vs_currencies=eur&include_24hr_change=true"
+    )
+    return http_get_json(url)
 
-# -------- Entscheidungslogik --------------------------------------------
+def fetch_history(cg_id):
+    # tägliche Daten (Schlusskurse) – 400 Tage reichen für EMA200
+    url = (
+        "https://api.coingecko.com/api/v3/coins/"
+        f"{cg_id}/market_chart?vs_currency=eur&days=400&interval=daily"
+    )
+    js = http_get_json(url)
+    closes = [p[1] for p in js.get("prices", [])]
+    return closes
 
-def decide(action_inputs: dict) -> Tuple[str, str]:
-    """
-    Inputs: dict mit keys price, chg24, ema50, ema200, rsi, vol_note
-    Rückgabe: (emoji, text)
-    Logik:
-      - Uptrend = EMA50 > EMA200
-      - Downtrend = EMA50 < EMA200
-      - RSI: <30 überverkauft, >70 überkauft
-    """
-    ema50 = action_inputs["ema50"]
-    ema200 = action_inputs["ema200"]
-    rsi_val = action_inputs["rsi"]
-    chg24 = action_inputs["chg24"]
+# ---------- Regel-Engine ----------
 
-    if ema50 is None or ema200 is None or rsi_val is None:
-        return "🟡", "Beobachten"
+def make_signal(price, pct24h, closes):
+    # Robustheit: wenn keine Historie ➜ nur Change-Regel
+    trend_up = False
+    mom_rsi = float("nan")
+    if closes and len(closes) >= 50:
+        ema50 = ema(closes[-250:], 50)   # begrenze Länge, beschleunigt
+        ema200 = ema(closes[-400:], 200)
+        trend_up = (ema50 is not None and ema200 is not None and ema50 > ema200)
+        mom_rsi = rsi(closes[-260:], 14)
 
-    uptrend = ema50 > ema200
-    downtrend = ema50 < ema200
+    # Heuristik:
+    # - Uptrend + RSI>60 + 24h≥+1%  -> Kaufen
+    # - RSI<40 + 24h≤-1%            -> Abwarten
+    # - sonst                        -> Halten
+    if trend_up and (not math.isnan(mom_rsi)) and mom_rsi >= 60 and pct24h >= 1.0:
+        return "🟢", "Kaufen"
+    if (not math.isnan(mom_rsi)) and mom_rsi <= 40 and pct24h <= -1.0:
+        return "🔴", "Abwarten"
+    return "🟡", "Halten"
 
-    # Regeln
-    if uptrend:
-        if rsi_val < 40:
-            return "🟢", "Kaufen (Dip im Aufwärtstrend)"
-        if 40 <= rsi_val <= 65 and chg24 >= -1.0:
-            return "🟢", "Kaufen/Halten"
-        if rsi_val > 70:
-            return "🔴", "Abwarten (überkauft)"
-        return "🟡", "Halten"
-    if downtrend:
-        if rsi_val < 30:
-            return "🟡", "Beobachten (möglicher Rebound)"
-        return "🔴", "Abwarten (Abwärtstrend)"
+# ---------- Hauptlogik ----------
 
-    # Seitwärts
-    if abs(chg24) < 1.0:
-        return "🟡", "Seitwärts – Halten"
-    return ("🟢", "Kaufen") if chg24 > 0 else ("🔴", "Abwarten")
+def load_state():
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
-# -------- Nachricht bauen -----------------------------------------------
+def save_state(d):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
 
-def build_message() -> str:
+def build_now():
     ids = [v[0] for v in COINS.values()]
-    snap = fetch_snapshot(ids)
+    spot = fetch_spot(ids)
 
+    # Historien pro Coin (einmalig je Coin)
+    history_cache = {}
+    signals = {}
+    lines = []
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines: List[str] = [f"📊 <b>Krypto-Signale — {ts}</b>"]
-    lines.append("Regeln: EMA50/EMA200 + RSI14 + 24h-Change. (Pro-Version)")
+    lines.append(f"📊 <b>Signal Snapshot — {ts}</b>")
 
     for ticker, (cg_id, nice) in COINS.items():
-        s = snap.get(cg_id, {})
-        price = s.get(VS_CCY)
-        chg24 = s.get(f"{VS_CCY}_24h_change")
-
-        # Defaults, falls später etwas schiefgeht
-        ema50_v = ema200_v = rsi_v = None
-        note = ""
-
-        try:
-            series = fetch_intraday_prices(cg_id)
-            if len(series) >= max(EMA_SLOW + 2, RSI_LEN + 2):
-                ema50_v = ema(series, EMA_FAST)[-1]
-                ema200_v = ema(series, EMA_SLOW)[-1]
-                rsi_v = rsi(series, RSI_LEN)[-1]
-            else:
-                note = " (zu wenig Intraday-Daten)"
-        except Exception:
-            note = " (Historie derzeit nicht verfügbar)"
-
-        if price is None or chg24 is None:
-            lines.append(f"⚠️ {nice}: keine aktuellen Daten{note}")
+        if cg_id not in spot:
+            lines.append(f"⚠️ {nice}: keine Daten")
             continue
+        price = float(spot[cg_id].get("eur") or 0.0)
+        chg = float(spot[cg_id].get("eur_24h_change") or 0.0)
 
-        emoji, action = decide({
-            "price": price,
-            "chg24": chg24,
-            "ema50": ema50_v,
-            "ema200": ema200_v,
-            "rsi": rsi_v,
-        })
+        # Historie (einmal pro Lauf pro Coin)
+        if cg_id not in history_cache:
+            try:
+                history_cache[cg_id] = fetch_history(cg_id)
+            except Exception:
+                history_cache[cg_id] = []
 
-        # Zeile rendern
-        extras = []
-        if ema50_v and ema200_v:
-            trend = "↑" if ema50_v > ema200_v else "↓" if ema50_v < ema200_v else "→"
-            extras.append(f"Trend: {trend}")
-        if rsi_v is not None:
-            extras.append(f"RSI: {rsi_v:.0f}")
-        extras_txt = " | " + " · ".join(extras) if extras else ""
+        emoji, action = make_signal(price, chg, history_cache[cg_id])
+        signals[ticker] = action
 
-        lines.append(
-            f"{emoji} {nice}: <b>{action}</b> "
-            f"({fmt_eur(price)}, 24h: {chg24:+.2f}%){extras_txt}{note}"
-        )
+        # hübsche Zeile
+        price_s = euro(price)
+        chg_s = f"{chg:+.2f}%".replace(".", ",")
+        lines.append(f"{emoji} {nice}: <b>{action}</b> ({price_s}, 24h: {chg_s})")
 
-    lines.append("\nℹ️ Hinweise: Grün = Kauf-Bias, Gelb = neutral, Rot = abwarten. "
-                 "Kein Financial Advice.")
-    return "\n".join(lines)
+    lines.append("\nℹ️ Regeln: Uptrend(EMA50>EMA200)+RSI≥60 & 24h≥+1% → Kaufen · RSI≤40 & 24h≤−1% → Abwarten · sonst Halten.")
+    return "\n".join(lines), signals
+
+def main():
+    try:
+        message, new_state = build_now()
+    except (HTTPError, URLError) as e:
+        # Bei API-Problemen nicht abbrechen: schreibe Hinweis
+        hint = f"⚠️ CoinGecko nicht erreichbar ({e})."
+        with open(OUT_FILE, "w", encoding="utf-8") as f:
+            f.write(hint)
+        print("WARN: api error -> send hint")
+        return
+
+    old_state = load_state()
+    changed = (old_state != new_state)
+
+    if changed:
+        # Nachricht zum Versand schreiben
+        with open(OUT_FILE, "w", encoding="utf-8") as f:
+            f.write(message)
+        # neuen Zustand speichern (wird später vom Workflow committed)
+        save_state(new_state)
+        print("changed: yes")
+    else:
+        # keine Versanddatei erzeugen -> Workflow sendet dann nichts
+        print("changed: no")
 
 if __name__ == "__main__":
-    print(build_message())
+    main()
