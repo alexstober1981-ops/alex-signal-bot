@@ -1,42 +1,35 @@
-# telegram_send.py
-# Liest out_message.txt und sendet an deinen Telegram-Chat.
+# telegram_send.py – sendet Signal an Telegram (mit --force Option)
 
-import os, json, urllib.parse, urllib.request, sys
+import os, sys, requests
+from generate_message import build_message_and_state, save_state
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
-API = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+def send(msg: str):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    r = requests.post(
+        url,
+        json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"},
+        timeout=25
+    )
+    r.raise_for_status()
 
-def send(text: str):
-    data = urllib.parse.urlencode({
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": "true",
-    }).encode("utf-8")
-    req = urllib.request.Request(API, data=data)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        r.read()
+def main(argv):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("❌ TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID fehlen!", file=sys.stderr)
+        return 1
 
-def main():
-    path = "out_message.txt"
-    if not os.path.exists(path):
-        print("no message file -> nothing to send")
-        return
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read().strip()
+    force = "--force" in argv  # bei „Status Now“-Workflow
+    msg, should_send, next_state = build_message_and_state()
 
-    # Telegram max ~4096 Zeichen pro Nachricht -> ggfs. stückeln
-    chunk = 3500
-    if len(text) <= chunk:
-        send(text)
+    if force or should_send:
+        send(msg)
+        save_state(next_state)
+        print("✅ Nachricht gesendet" + (" (force)" if force else ""))
     else:
-        parts = [text[i:i+chunk] for i in range(0, len(text), chunk)]
-        for idx, p in enumerate(parts, 1):
-            send((f"Teil {idx}/{len(parts)}\n" + p) if len(parts) > 1 else p)
+        print("ℹ️ Keine Änderung – nichts gesendet")
+    return 0
 
 if __name__ == "__main__":
-    if not TOKEN or not CHAT_ID:
-        sys.exit("TELEGRAM_TOKEN/TELEGRAM_CHAT_ID fehlen (GitHub Secrets)!")
-    main()
+    raise SystemExit(main(sys.argv[1:]))
