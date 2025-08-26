@@ -2,7 +2,7 @@ name: Telegram Signals
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # alle 15 Minuten
+    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
   workflow_dispatch:
 
 jobs:
@@ -22,10 +22,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run bot
+      - name: Build message
+        run: |
+          python generate_message.py > message.txt
+
+      - name: Send to Telegram
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python generate_message.py > message.txt
           python telegram_send.py message.txt
