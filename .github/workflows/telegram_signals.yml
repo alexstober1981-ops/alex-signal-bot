@@ -3,11 +3,12 @@ name: Telegram Signals
 on:
   schedule:
     - cron: '*/15 * * * *'   # alle 15 Minuten
-  workflow_dispatch:         # manuell starten
+  workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -22,7 +23,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Generate message & state
+      - name: Generate message
+        # du kannst die Schwellen hier ändern (Standard: +3 / -3)
+        env:
+          BUY_THRESHOLD: "3.0"
+          SELL_THRESHOLD: "-3.0"
         run: python generate_message.py
 
       - name: Send to Telegram
