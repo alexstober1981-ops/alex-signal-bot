@@ -1,14 +1,10 @@
 # generate_message.py
-# Holt Daten von CoinGecko, berechnet einfache Indikatoren (EMA50/EMA200, RSI14),
-# baut die Nachricht und schreibt sie nur dann in out_message.txt,
-# wenn sich mindestens EIN Signal gegenüber signal_state.json geändert hat.
+# Holt Live-Preise von CoinGecko, entscheidet Signal (Kaufen/Halten/Abwarten)
+# Sendet nur bei Signal-Änderung oder wenn Preis um bestimmte % verändert.
 
-import json, math, sys, time
+import json, os, requests
 from datetime import datetime, timezone
-from urllib.request import urlopen, Request
-from urllib.error import URLError, HTTPError
 
-# === Coins: Ticker -> (coingecko-id, Anzeigename) ===
 COINS = {
     "BTC": ("bitcoin", "Bitcoin (BTC)"),
     "ETH": ("ethereum", "Ethereum (ETH)"),
@@ -25,162 +21,57 @@ COINS = {
     "SEI": ("sei-network", "Sei (SEI)"),
 }
 
+# Sende-Schwellen: BTC 1%, ETH 1.5%, große Coins 2%, kleinere 3%
+THRESHOLDS = {
+    "BTC": 0.010,
+    "ETH": 0.015,
+    "SOL": 0.020, "ADA": 0.020, "AVAX": 0.020, "XRP": 0.020,
+    "DOT": 0.030, "RNDR": 0.030, "KAS": 0.030,
+    "SUI": 0.030, "FET": 0.030, "HBAR": 0.030, "SEI": 0.030,
+}
+
 STATE_FILE = "signal_state.json"
-OUT_FILE = "out_message.txt"
-
-# ---------- kleine Helfer ----------
-
-def http_get_json(url: str):
-    req = Request(url, headers={"User-Agent": "signal-bot/1.0"})
-    with urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode("utf-8"))
-
-def ema(values, period):
-    k = 2 / (period + 1.0)
-    ema_val = None
-    for v in values:
-        ema_val = v if ema_val is None else (v - ema_val) * k + ema_val
-    return ema_val if ema_val is not None else float("nan")
-
-def rsi(values, period=14):
-    # klassisches Wilder-RSI auf Schlusskursen (daily)
-    if len(values) < period + 1:
-        return float("nan")
-    gains, losses = [], []
-    for i in range(1, len(values)):
-        ch = values[i] - values[i-1]
-        gains.append(max(ch, 0))
-        losses.append(max(-ch, 0))
-    # Start mit Simple Moving Average
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    # Wilder Glättung
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rs))
-
-def euro(n):
-    s = f"€{n:,.2f}"
-    return s.replace(",", "X").replace(".", ",").replace("X", ".")
-
-# ---------- Daten holen ----------
-
-def fetch_spot(ids):
-    url = (
-        "https://api.coingecko.com/api/v3/simple/price"
-        f"?ids={','.join(ids)}&vs_currencies=eur&include_24hr_change=true"
-    )
-    return http_get_json(url)
-
-def fetch_history(cg_id):
-    # tägliche Daten (Schlusskurse) – 400 Tage reichen für EMA200
-    url = (
-        "https://api.coingecko.com/api/v3/coins/"
-        f"{cg_id}/market_chart?vs_currency=eur&days=400&interval=daily"
-    )
-    js = http_get_json(url)
-    closes = [p[1] for p in js.get("prices", [])]
-    return closes
-
-# ---------- Regel-Engine ----------
-
-def make_signal(price, pct24h, closes):
-    # Robustheit: wenn keine Historie ➜ nur Change-Regel
-    trend_up = False
-    mom_rsi = float("nan")
-    if closes and len(closes) >= 50:
-        ema50 = ema(closes[-250:], 50)   # begrenze Länge, beschleunigt
-        ema200 = ema(closes[-400:], 200)
-        trend_up = (ema50 is not None and ema200 is not None and ema50 > ema200)
-        mom_rsi = rsi(closes[-260:], 14)
-
-    # Heuristik:
-    # - Uptrend + RSI>60 + 24h≥+1%  -> Kaufen
-    # - RSI<40 + 24h≤-1%            -> Abwarten
-    # - sonst                        -> Halten
-    if trend_up and (not math.isnan(mom_rsi)) and mom_rsi >= 60 and pct24h >= 1.0:
-        return "🟢", "Kaufen"
-    if (not math.isnan(mom_rsi)) and mom_rsi <= 40 and pct24h <= -1.0:
-        return "🔴", "Abwarten"
-    return "🟡", "Halten"
-
-# ---------- Hauptlogik ----------
 
 def load_state():
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+    if os.path.exists(STATE_FILE):
+        try:
+            return json.load(open(STATE_FILE, "r", encoding="utf-8"))
+        except: return {}
+    return {}
 
-def save_state(d):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+def save_state(state):
+    json.dump(state, open(STATE_FILE, "w", encoding="utf-8"), indent=2)
 
-def build_now():
-    ids = [v[0] for v in COINS.values()]
-    spot = fetch_spot(ids)
+def get_action(change):
+    if change >= 3.0: return "🟢", "Kaufen"
+    if change <= -3.0: return "🔴", "Abwarten"
+    return "🟡", "Halten"
 
-    # Historien pro Coin (einmalig je Coin)
-    history_cache = {}
-    signals = {}
-    lines = []
+def fetch(ids):
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={','.join(ids)}&vs_currencies=eur&include_24hr_change=true"
+    return requests.get(url, timeout=25).json()
+
+def build_message_and_state():
+    prev = load_state()
+    data = fetch([v[0] for v in COINS.values()])
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines.append(f"📊 <b>Signal Snapshot — {ts}</b>")
+    lines, should_send, next_state = [f"📊 <b>Signals {ts}</b>"], False, {}
 
-    for ticker, (cg_id, nice) in COINS.items():
-        if cg_id not in spot:
-            lines.append(f"⚠️ {nice}: keine Daten")
-            continue
-        price = float(spot[cg_id].get("eur") or 0.0)
-        chg = float(spot[cg_id].get("eur_24h_change") or 0.0)
+    for t, (cg, name) in COINS.items():
+        if cg not in data: continue
+        price, chg = data[cg]["eur"], data[cg]["eur_24h_change"]
+        emo, act = get_action(chg)
 
-        # Historie (einmal pro Lauf pro Coin)
-        if cg_id not in history_cache:
-            try:
-                history_cache[cg_id] = fetch_history(cg_id)
-            except Exception:
-                history_cache[cg_id] = []
+        last, moved = prev.get(t, {}), False
+        if "price" in last:
+            rel = abs(price - last["price"]) / last["price"]
+            moved = rel >= THRESHOLDS.get(t, 0.03)
+        else: moved = True
 
-        emoji, action = make_signal(price, chg, history_cache[cg_id])
-        signals[ticker] = action
+        if act != last.get("action") or moved: should_send = True
+        lines.append(f"{emo} {name}: <b>{act}</b> (€{price:,.2f}, 24h {chg:+.2f}%)".replace(",", "X").replace(".", ",").replace("X", "."))
 
-        # hübsche Zeile
-        price_s = euro(price)
-        chg_s = f"{chg:+.2f}%".replace(".", ",")
-        lines.append(f"{emoji} {nice}: <b>{action}</b> ({price_s}, 24h: {chg_s})")
+        next_state[t] = {"price": price, "action": act}
 
-    lines.append("\nℹ️ Regeln: Uptrend(EMA50>EMA200)+RSI≥60 & 24h≥+1% → Kaufen · RSI≤40 & 24h≤−1% → Abwarten · sonst Halten.")
-    return "\n".join(lines), signals
-
-def main():
-    try:
-        message, new_state = build_now()
-    except (HTTPError, URLError) as e:
-        # Bei API-Problemen nicht abbrechen: schreibe Hinweis
-        hint = f"⚠️ CoinGecko nicht erreichbar ({e})."
-        with open(OUT_FILE, "w", encoding="utf-8") as f:
-            f.write(hint)
-        print("WARN: api error -> send hint")
-        return
-
-    old_state = load_state()
-    changed = (old_state != new_state)
-
-    if changed:
-        # Nachricht zum Versand schreiben
-        with open(OUT_FILE, "w", encoding="utf-8") as f:
-            f.write(message)
-        # neuen Zustand speichern (wird später vom Workflow committed)
-        save_state(new_state)
-        print("changed: yes")
-    else:
-        # keine Versanddatei erzeugen -> Workflow sendet dann nichts
-        print("changed: no")
-
-if __name__ == "__main__":
-    main()
+    lines.append("\nℹ️ Sendet nur bei Signal-Wechsel oder wenn Preis BTC 1%, ETH 1.5%, große 2%, kleine 3% bewegt.")
+    return "\n".join(lines), should_send, next_state
