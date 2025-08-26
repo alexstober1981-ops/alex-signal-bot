@@ -1,44 +1,42 @@
 # telegram_send.py
-# Sendet Text/Nachricht an Telegram (Bot API).
+# Liest out_message.txt und sendet an deinen Telegram-Chat.
 
-import os
-import sys
-import requests
+import os, json, urllib.parse, urllib.request, sys
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-API_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage" if TOKEN else None
+API = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-def send_message(text: str) -> dict:
-    if not TOKEN or not CHAT_ID:
-        raise SystemExit("Fehlende Umgebungsvariablen: TELEGRAM_TOKEN/TELEGRAM_CHAT_ID")
-    resp = requests.post(
-        API_URL,
-        data={
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        },
-        timeout=20,
-    )
-    resp.raise_for_status()
-    return resp.json()
+def send(text: str):
+    data = urllib.parse.urlencode({
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "true",
+    }).encode("utf-8")
+    req = urllib.request.Request(API, data=data)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        r.read()
+
+def main():
+    path = "out_message.txt"
+    if not os.path.exists(path):
+        print("no message file -> nothing to send")
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read().strip()
+
+    # Telegram max ~4096 Zeichen pro Nachricht -> ggfs. stückeln
+    chunk = 3500
+    if len(text) <= chunk:
+        send(text)
+    else:
+        parts = [text[i:i+chunk] for i in range(0, len(text), chunk)]
+        for idx, p in enumerate(parts, 1):
+            send((f"Teil {idx}/{len(parts)}\n" + p) if len(parts) > 1 else p)
 
 if __name__ == "__main__":
-    # Nutzung:
-    # 1) python telegram_send.py "Hallo"
-    # 2) python telegram_send.py path/zur/datei.txt  (liest Inhalt)
-    if len(sys.argv) >= 2:
-        arg = sys.argv[1]
-        if os.path.isfile(arg):
-            with open(arg, "r", encoding="utf-8") as f:
-                msg = f.read().strip()
-        else:
-            msg = " ".join(sys.argv[1:])
-    else:
-        msg = "Test vom Telegram-Bot ✅"
-
-    r = send_message(msg)
-    print("Sent:", r.get("ok", False))
+    if not TOKEN or not CHAT_ID:
+        sys.exit("TELEGRAM_TOKEN/TELEGRAM_CHAT_ID fehlen (GitHub Secrets)!")
+    main()
