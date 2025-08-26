@@ -2,33 +2,58 @@ name: Telegram Signals
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
+    - cron: '*/15 * * * *'  # alle 15 Minuten (UTC)
   workflow_dispatch:
 
+concurrency:
+  group: telegram-signals
+  cancel-in-progress: false
+
 jobs:
-  send-signals:
+  run:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          # 'requests' wird NICHT benötigt – wir nutzen urllib
+          echo "ready"
 
-      - name: Build message
+      - name: Generate message & state
+        id: gen
         run: |
-          python generate_message.py > message.txt
+          python generate_message.py
+          if [ -f out_message.txt ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit updated signal_state.json
+        if: steps.gen.outputs.changed == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@github.com"
+            git add signal_state.json
+            git commit -m "Update signal state [skip ci]"
+            git push
+          fi
 
       - name: Send to Telegram
+        if: steps.gen.outputs.changed == 'true'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python telegram_send.py message.txt
+          python telegram_send.py
