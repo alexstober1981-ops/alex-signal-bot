@@ -1,0 +1,34 @@
+name: Telegram Signals
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 05:00 Berlin (03:00 UTC)
+    - cron: '0 8 * * *'   # 10:00 Berlin (08:00 UTC)
+    - cron: '30 12 * * *' # 14:30 Berlin (12:30 UTC)
+    - cron: '0 16 * * *'  # 18:00 Berlin (16:00 UTC)
+    - cron: '0 20 * * *'  # 22:00 Berlin (20:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  send-signals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Generate message
+        run: python generate_message.py > message.txt
+
+      - name: Send message to Telegram
+        run: python telegram_send.py "$(cat message.txt)"
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
