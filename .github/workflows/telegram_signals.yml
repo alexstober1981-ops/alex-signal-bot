@@ -34,8 +34,9 @@ jobs:
             echo "❌ Missing secret: TELEGRAM_CHAT_ID"; exit 1; fi
           echo "✅ Secrets vorhanden."
 
-      - name: Send to Telegram
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python telegram_send.py
+      - - name: Send to Telegram
+  env:
+    TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  run: python telegram_send.py
+        
