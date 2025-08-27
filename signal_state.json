@@ -3,18 +3,18 @@
   "coins": {
     "BTC": {
       "symbol": "BTC",
-      "last_price": 111235.0,
-      "last_ts": 1756337859.302533
+      "last_price": 111169.0,
+      "last_ts": 1756338402.396823
     },
     "ETH": {
       "symbol": "ETH",
-      "last_price": 4510.91,
-      "last_ts": 1756337859.3025405
+      "last_price": 4495.24,
+      "last_ts": 1756338402.3968318
     },
     "SOL": {
       "symbol": "SOL",
-      "last_price": 204.06,
-      "last_ts": 1756337859.302547
+      "last_price": 203.12,
+      "last_ts": 1756338402.3968384
     },
     "KAS": {
       "symbol": "KAS",
@@ -110,9 +110,9 @@
     },
     "AVAX": {
       "symbol": "AVAX",
-      "last_price": 24.5,
-      "last_ts": 1756337859.302553
+      "last_price": 24.45,
+      "last_ts": 1756338402.3968446
     }
   },
-  "last_run": "2025-08-27T23:37:39+00:00"
+  "last_run": "2025-08-27T23:46:42+00:00"
 }
