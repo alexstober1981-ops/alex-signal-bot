@@ -2,11 +2,15 @@ name: Telegram Signals
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # alle 15 Minuten
-  workflow_dispatch:
+    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
+  workflow_dispatch: {}
 
 permissions:
-  contents: write            # damit der State committet werden kann
+  contents: write    # damit der State-Commit klappt
+
+concurrency:
+  group: telegram-signals
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -21,52 +25,36 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install --upgrade requests
 
-      # --- optional: Variablen zentral setzen (Coins & Schwellen) ---
+      # optional – hier könntest du später ENV-Overrides hinterlegen
       - name: Export config env
         run: |
-          echo "COINGECKO_IDS=bitcoin,ethereum,solana" >> $GITHUB_ENV
-          echo "SYMBOLS=BTC,ETH,SOL" >> $GITHUB_ENV
-          # Schwellen (in %): Info / Signal / Alarm
-          echo "THRESH_INFO=0.8" >> $GITHUB_ENV
-          echo "THRESH_SIGNAL=1.5" >> $GITHUB_ENV
-          echo "THRESH_ALERT=3.0" >> $GITHUB_ENV
-
-      # --- Secrets prüfen, bevor gesendet wird ---
-      - name: Check Telegram secrets
-        run: |
-          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then
-            echo "Missing secret: TELEGRAM_BOT_TOKEN"; exit 1; fi
-          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
-            echo "Missing secret: TELEGRAM_CHAT_ID"; exit 1; fi
-          echo "✅ Secrets vorhanden."
+          echo "CONFIG_OK=1" >> $GITHUB_ENV
 
       - name: Generate message & state
-        env:
-          COINGECKO_IDS: ${{ env.COINGECKO_IDS }}
-          SYMBOLS: ${{ env.SYMBOLS }}
-          THRESH_INFO: ${{ env.THRESH_INFO }}
-          THRESH_SIGNAL: ${{ env.THRESH_SIGNAL }}
-          THRESH_ALERT: ${{ env.THRESH_ALERT }}
         run: python generate_message.py
+
+      - name: Commit updated signal_state.json (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain -- signal_state.json)" ]]; then
+            git add signal_state.json
+            git commit -m "state: update $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          else
+            echo "No state change."
+          fi
+
+      - name: Check Telegram secrets
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing secret: TELEGRAM_BOT_TOKEN"; exit 1; fi
+          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then echo "Missing secret: TELEGRAM_CHAT_ID"; exit 1; fi
+          echo "✅ Secrets vorhanden."
 
       - name: Send to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python telegram_send.py
-
-      - name: Commit updated signal_state.json (if changed)
-        run: |
-          git config user.email "bot@users.noreply.github.com"
-          git config user.name  "GitHub Actions"
-          git add signal_state.json message.txt || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update signal_state $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            git push
-          else
-            echo "No state changes to commit."
-          fi
