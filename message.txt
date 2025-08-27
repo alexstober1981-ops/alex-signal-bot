@@ -1,4 +1,4 @@
-📊 Signal Snapshot — 2025-08-27 10:48 UTC
+📊 Signal Snapshot — 2025-08-27 10:57 UTC
 Basis: USD • TF: 15m/1h • Quellen: Binance (Indikatoren), CoinGecko (Preis/24h)
 
 🔥 Top 3 Signale:
@@ -6,28 +6,28 @@ Basis: USD • TF: 15m/1h • Quellen: Binance (Indikatoren), CoinGecko (Preis/2
   2) BTC — 🟡 HOLD (Score 0.0)
   3) ETH — 🟡 HOLD (Score 0.0)
 
-⏸️ BTC: $111 017.00 • 24h +0.61% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ BTC: $111 080.00 • 24h +0.79% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 
-⏸️ ETH: $4 580.07 • 24h +3.13% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ ETH: $4 586.56 • 24h +3.24% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 
-⏸️ SOL: $203.80 • 24h +8.13% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ SOL: $204.24 • 24h +8.36% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score -1.0 | ExtUp)
 
-⏸️ KAS: $0.0869 • 24h +2.02% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ KAS: $0.0870 • 24h +2.15% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 
-⏸️ RNDR: $3.61 • 24h +3.67% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ RNDR: $3.62 • 24h +4.02% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 
-⏸️ FET: $0.6420 • 24h +1.21% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ FET: $0.6427 • 24h +1.49% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 
-⏸️ SUI: $3.43 • 24h +0.51% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ SUI: $3.43 • 24h +0.99% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 
-⏸️ AVAX: $24.39 • 24h +3.69% • RSI15 —/RSI1h — • MACD — • BRK —
+⏸️ AVAX: $24.44 • 24h +3.94% • RSI15 —/RSI1h — • MACD — • BRK —
 ➡️ 🟡 HOLD  (Score 0.0)
 Legende: 🟡 Hold • ℹ️ Info ⚠️ • 🟢/🔴 Signal • BRK=Breakout 1h
 Levels auf Basis 1h-ATR (orientativ, kein Finanzrat)🙏
