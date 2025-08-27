@@ -11,13 +11,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - run: pip install --upgrade requests
+
       - name: Generate
         env:
           COOLDOWN_MINUTES: "0"
         run: python generate_message.py
+
       - name: Send
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python telegram_send.py
