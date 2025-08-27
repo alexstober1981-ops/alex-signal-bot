@@ -1,0 +1,10 @@
+[
+  { "symbol": "BTC",  "coingecko_id": "bitcoin",       "binance": "BTCUSDT",  "enabled": true },
+  { "symbol": "ETH",  "coingecko_id": "ethereum",      "binance": "ETHUSDT",  "enabled": true },
+  { "symbol": "SOL",  "coingecko_id": "solana",        "binance": "SOLUSDT",  "enabled": true },
+  { "symbol": "KAS",  "coingecko_id": "kaspa",         "binance": "KASUSDT",  "enabled": true },
+  { "symbol": "RNDR", "coingecko_id": "render-token",  "binance": "RNDRUSDT", "enabled": true },
+  { "symbol": "FET",  "coingecko_id": "fetch-ai",      "binance": "FETUSDT",  "enabled": true },
+  { "symbol": "SUI",  "coingecko_id": "sui",           "binance": "SUIUSDT",  "enabled": true },
+  { "symbol": "AVAX", "coingecko_id": "avalanche-2",   "binance": "AVAXUSDT", "enabled": true }
+]
