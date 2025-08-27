@@ -1,9 +1,9 @@
 {
-  "generated_at": "2025-08-27T10:33:19.612499+00:00",
+  "generated_at": "2025-08-27T10:37:30.775881+00:00",
   "coins": [
     {
       "symbol": "BTC",
-      "change_24h": 0.6522616995596229,
+      "change_24h": 0.6351127307736704,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -15,7 +15,7 @@
       "breakout_up": false,
       "breakout_down": false,
       "atr_1h": null,
-      "price": 111079.0,
+      "price": 111064.0,
       "signal": "🟡 HOLD",
       "score": 0.0,
       "targets": {
@@ -26,7 +26,7 @@
     },
     {
       "symbol": "ETH",
-      "change_24h": 3.8579181097921937,
+      "change_24h": 3.609927656775633,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -38,7 +38,7 @@
       "breakout_up": false,
       "breakout_down": false,
       "atr_1h": null,
-      "price": 4595.72,
+      "price": 4592.13,
       "signal": "🟡 HOLD",
       "score": 0.0,
       "targets": {
@@ -49,7 +49,7 @@
     },
     {
       "symbol": "SOL",
-      "change_24h": 8.6484892200189,
+      "change_24h": 8.573265174377244,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -61,7 +61,7 @@
       "breakout_up": false,
       "breakout_down": false,
       "atr_1h": null,
-      "price": 204.51,
+      "price": 204.36,
       "signal": "🟡 HOLD",
       "score": -1.0,
       "targets": {
@@ -72,7 +72,7 @@
     },
     {
       "symbol": "KAS",
-      "change_24h": 2.238095411390816,
+      "change_24h": 2.1709963720785166,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -84,7 +84,7 @@
       "breakout_up": false,
       "breakout_down": false,
       "atr_1h": null,
-      "price": 0.087092,
+      "price": 0.087091,
       "signal": "🟡 HOLD",
       "score": 0.0,
       "targets": {
@@ -95,7 +95,7 @@
     },
     {
       "symbol": "RNDR",
-      "change_24h": 4.114485376766877,
+      "change_24h": 3.9788494744252922,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -118,7 +118,7 @@
     },
     {
       "symbol": "FET",
-      "change_24h": 1.6811488318080363,
+      "change_24h": 1.492567400270946,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -130,7 +130,7 @@
       "breakout_up": false,
       "breakout_down": false,
       "atr_1h": null,
-      "price": 0.643673,
+      "price": 0.643324,
       "signal": "🟡 HOLD",
       "score": 0.0,
       "targets": {
@@ -141,7 +141,7 @@
     },
     {
       "symbol": "SUI",
-      "change_24h": 1.0633641977463324,
+      "change_24h": 0.7592341595320028,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -164,7 +164,7 @@
     },
     {
       "symbol": "AVAX",
-      "change_24h": 4.211224445200759,
+      "change_24h": 4.195209874779739,
       "rsi_15m": null,
       "rsi_1h": null,
       "macd": {
@@ -176,7 +176,7 @@
       "breakout_up": false,
       "breakout_down": false,
       "atr_1h": null,
-      "price": 24.4,
+      "price": 24.41,
       "signal": "🟡 HOLD",
       "score": 0.0,
       "targets": {
