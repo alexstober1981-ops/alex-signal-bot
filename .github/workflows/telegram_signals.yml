@@ -2,11 +2,11 @@ name: Telegram Signals
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
+    - cron: "*/15 * * * *"    # alle 15 Min (UTC)
   workflow_dispatch: {}
 
 permissions:
-  contents: write    # damit der State-Commit klappt
+  contents: write
 
 concurrency:
   group: telegram-signals
@@ -27,20 +27,17 @@ jobs:
       - name: Install dependencies
         run: pip install --upgrade requests
 
-      # optional – hier könntest du später ENV-Overrides hinterlegen
-      - name: Export config env
-        run: |
-          echo "CONFIG_OK=1" >> $GITHUB_ENV
-
       - name: Generate message & state
+        env:
+          COOLDOWN_MINUTES: "60"   # -> hier Cooldown ändern (Minuten)
         run: python generate_message.py
 
-      - name: Commit updated signal_state.json (if changed)
+      - name: Commit updated state (if changed)
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [[ -n "$(git status --porcelain -- signal_state.json)" ]]; then
-            git add signal_state.json
+          if [[ -n "$(git status --porcelain -- signal_state.json message.txt)" ]]; then
+            git add signal_state.json message.txt
             git commit -m "state: update $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
           else
