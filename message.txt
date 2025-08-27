@@ -1,10 +1,10 @@
-📊 Signal Snapshot — 2025-08-27 09:34 UTC
+📊 Signal Snapshot — 2025-08-27 09:46 UTC
 
 Basis: USD • Intervall: 15 Min • Quelle: CoinGecko
 
-🟡 BTC: $111,013.00 • 15m +0.00% • 24h +0.63% — HOLD
-🟡 ETH: $4,614.69 • 15m +0.00% • 24h +4.12% — HOLD
-🟡 SOL: $204.77 • 15m +0.00% • 24h +8.44% — HOLD
+🟡 BTC: $110,915.00 • 15m -0.09% • 24h +0.74% — HOLD
+🟡 ETH: $4,600.76 • 15m -0.30% • 24h +4.31% — HOLD
+🟡 SOL: $204.05 • 15m -0.35% • 24h +8.64% — HOLD
 
 🟡 Keine nennenswerte Bewegung über den Info-Schwellen.
 
