@@ -1,14 +1,189 @@
 {
-  "last": {
-    "BTC": {
-      "price": 110915.0
+  "generated_at": "2025-08-27T10:33:19.612499+00:00",
+  "coins": [
+    {
+      "symbol": "BTC",
+      "change_24h": 0.6522616995596229,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 111079.0,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
     },
-    "ETH": {
-      "price": 4600.76
+    {
+      "symbol": "ETH",
+      "change_24h": 3.8579181097921937,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 4595.72,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
     },
-    "SOL": {
-      "price": 204.05
+    {
+      "symbol": "SOL",
+      "change_24h": 8.6484892200189,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 204.51,
+      "signal": "🟡 HOLD",
+      "score": -1.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
+    },
+    {
+      "symbol": "KAS",
+      "change_24h": 2.238095411390816,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 0.087092,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
+    },
+    {
+      "symbol": "RNDR",
+      "change_24h": 4.114485376766877,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 3.62,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
+    },
+    {
+      "symbol": "FET",
+      "change_24h": 1.6811488318080363,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 0.643673,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
+    },
+    {
+      "symbol": "SUI",
+      "change_24h": 1.0633641977463324,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 3.44,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
+    },
+    {
+      "symbol": "AVAX",
+      "change_24h": 4.211224445200759,
+      "rsi_15m": null,
+      "rsi_1h": null,
+      "macd": {
+        "line": null,
+        "signal": null,
+        "hist": null,
+        "hist_prev": null
+      },
+      "breakout_up": false,
+      "breakout_down": false,
+      "atr_1h": null,
+      "price": 24.4,
+      "signal": "🟡 HOLD",
+      "score": 0.0,
+      "targets": {
+        "tp1": null,
+        "tp2": null,
+        "sl": null
+      }
     }
-  },
-  "last_ts": 1756288010
+  ]
 }
