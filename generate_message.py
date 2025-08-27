@@ -2,116 +2,116 @@
 # -*- coding: utf-8 -*-
 
 """
-Expert Signals generator for Telegram:
-- Coins: BTC, ETH, SOL, KAS, RNDR, FET, SUI, AVAX (+ optional VET, XRP, ADA)
-- Data:
-    • Binance klines (15m & 1h) -> RSI & MACD
-    • CoinGecko current price + 24h change
+Pro Signal Generator for Telegram
+- Datenquellen:
+  • Binance: 15m & 1h Klines (RSI, MACD, Breakouts, ATR)
+  • CoinGecko: Spot-Preis & 24h-%Change
 - Output:
-    • message.txt  (for telegram_send.py)
-    • signal_state.json (metrics snapshot)
+  • message.txt (für telegram_send.py)
+  • signal_state.json (kompletter Snapshot)
 """
 
 import json
-import math
-import os
 from datetime import datetime, timezone
-
 import requests
 
-# ------------------------------------------------------------
-# Configuration
-# ------------------------------------------------------------
+# ------------------------------- Konfiguration -------------------------------
 
 COINS = [
-    # symbol, CoinGecko id, Binance symbol (USDT pair)
     ("BTC", "bitcoin", "BTCUSDT"),
     ("ETH", "ethereum", "ETHUSDT"),
     ("SOL", "solana", "SOLUSDT"),
     ("KAS", "kaspa", "KASUSDT"),
     ("RNDR", "render-token", "RNDRUSDT"),
-    ("FET", "fetch-ai", "FETUSDT"),        # (nach ASI-Merger bleibt FET Symbol auf Binance)
+    ("FET", "fetch-ai", "FETUSDT"),     # (ASI-Umbenennung – Ticker auf Binance bleibt FET)
     ("SUI", "sui", "SUIUSDT"),
     ("AVAX", "avalanche-2", "AVAXUSDT"),
-    # Optional – einfach einkommentieren
+    # weitere Coins optional:
     # ("VET", "vechain", "VETUSDT"),
     # ("XRP", "ripple", "XRPUSDT"),
     # ("ADA", "cardano", "ADAUSDT"),
 ]
 
 BINANCE_BASE = "https://api.binance.com/api/v3/klines"
-COINGECKO_PRICE = "https://api.coingecko.com/api/v3/simple/price"
+CG_PRICE = "https://api.coingecko.com/api/v3/simple/price"
 
-# Technical settings
+TIMEOUT = 12
+HEADERS = {"User-Agent": "alex-signal-bot/2.0"}
+
+# Technische Parameter
 RSI_PERIOD = 14
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
+MACD_FAST, MACD_SLOW, MACD_SIG = 12, 26, 9
+ATR_PERIOD = 14
+BRK_LOOKBACK = 20   # 1h-Breakout-Periode
 
-TIMEOUT = 12  # seconds
-HEADERS = {"User-Agent": "alex-signal-bot/1.0"}
-
-# ------------------------------------------------------------
-# Helpers: math
-# ------------------------------------------------------------
+# ------------------------------- Utils / Math --------------------------------
 
 def ema(values, period):
-    """Exponential Moving Average without pandas."""
-    if not values or period <= 0 or len(values) < period:
+    if not values or len(values) < period:
         return []
     k = 2 / (period + 1)
-    ema_vals = []
+    out = []
     sma = sum(values[:period]) / period
-    ema_vals.append(sma)
-    for price in values[period:]:
-        ema_vals.append(price * k + ema_vals[-1] * (1 - k))
-    return ema_vals
+    out.append(sma)
+    for v in values[period:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return out
 
 def rsi(values, period=14):
-    """Relative Strength Index (Wilder)."""
-    if len(values) < period + 1:
+    n = len(values)
+    if n < period + 1:
         return None
     gains = []
     losses = []
     for i in range(1, period + 1):
-        delta = values[i] - values[i - 1]
-        gains.append(max(delta, 0.0))
-        losses.append(max(-delta, 0.0))
+        d = values[i] - values[i-1]
+        gains.append(max(d, 0.0))
+        losses.append(max(-d, 0.0))
     avg_gain = sum(gains) / period
     avg_loss = sum(losses) / period
-    for i in range(period + 1, len(values)):
-        delta = values[i] - values[i - 1]
-        gain = max(delta, 0.0)
-        loss = max(-delta, 0.0)
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
+    for i in range(period + 1, n):
+        d = values[i] - values[i-1]
+        g = max(d, 0.0)
+        l = max(-d, 0.0)
+        avg_gain = (avg_gain * (period - 1) + g) / period
+        avg_loss = (avg_loss * (period - 1) + l) / period
     if avg_loss == 0:
         return 100.0
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
-def macd(values, fast=12, slow=26, signal=9):
-    """MACD line, signal line, histogram (last values)."""
+def macd_series(values, fast=12, slow=26, signal=9):
     if len(values) < slow + signal:
         return None, None, None
-    ema_fast = ema(values, fast)
-    ema_slow = ema(values, slow)
-    # align to same tail length
-    diff_len = len(ema_slow) - len(ema_fast)
-    if diff_len > 0:
-        ema_slow = ema_slow
-        ema_fast = ema_fast[diff_len:]
-    elif diff_len < 0:
-        ema_fast = ema_fast
-        ema_slow = ema_slow[-len(ema_fast):]
-    macd_line_all = [a - b for a, b in zip(ema_fast, ema_slow)]
-    signal_all = ema(macd_line_all, signal)
-    if not signal_all:
-        return None, None, None
-    # align tail
-    macd_line_all = macd_line_all[-len(signal_all):]
-    hist_all = [m - s for m, s in zip(macd_line_all, signal_all)]
-    return macd_line_all[-1], signal_all[-1], hist_all[-1]
+    ef = ema(values, fast)
+    es = ema(values, slow)
+    # align
+    if len(ef) > len(es):
+        ef = ef[-len(es):]
+    elif len(es) > len(ef):
+        es = es[-len(ef):]
+    macd_line = [a - b for a, b in zip(ef, es)]
+    sig_line = ema(macd_line, signal)
+    macd_line = macd_line[-len(sig_line):]
+    hist = [m - s for m, s in zip(macd_line, sig_line)]
+    return macd_line, sig_line, hist
+
+def atr(high, low, close, period=14):
+    n = len(close)
+    if n < period + 1:
+        return None
+    tr = []
+    for i in range(n):
+        if i == 0:
+            tr.append(high[i] - low[i])
+        else:
+            tr.append(max(
+                high[i] - low[i],
+                abs(high[i] - close[i-1]),
+                abs(low[i] - close[i-1])
+            ))
+    atr_vals = ema(tr, period)
+    return atr_vals[-1] if atr_vals else None
 
 def fmt_price(x):
     if x is None:
@@ -125,154 +125,221 @@ def fmt_price(x):
 def fmt_pct(x):
     if x is None:
         return "—"
-    sign = "+" if x >= 0 else ""
-    return f"{sign}{x:.2f}%"
+    s = "+" if x >= 0 else ""
+    return f"{s}{x:.2f}%"
 
-# ------------------------------------------------------------
-# Data fetchers
-# ------------------------------------------------------------
+# ------------------------------- Datenfetcher ---------------------------------
 
-def get_binance_closes(symbol: str, interval: str, limit: int = 250):
-    """Fetch close prices from Binance klines."""
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
+def get_klines(symbol, interval, limit=300):
+    p = {"symbol": symbol, "interval": interval, "limit": limit}
     try:
-        r = requests.get(BINANCE_BASE, params=params, headers=HEADERS, timeout=TIMEOUT)
+        r = requests.get(BINANCE_BASE, params=p, headers=HEADERS, timeout=TIMEOUT)
         r.raise_for_status()
-        data = r.json()
-        closes = [float(c[4]) for c in data]  # close price
-        return closes
+        raw = r.json()
+        out = {
+            "open": [float(k[1]) for k in raw],
+            "high": [float(k[2]) for k in raw],
+            "low":  [float(k[3]) for k in raw],
+            "close":[float(k[4]) for k in raw],
+        }
+        return out
     except Exception:
         return None
 
-def get_cg_prices(ids):
-    """Get current price and 24h change from CoinGecko."""
-    params = {
-        "ids": ",".join(ids),
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
-    }
+def get_prices(ids):
+    p = {"ids": ",".join(ids), "vs_currencies": "usd", "include_24hr_change": "true"}
     try:
-        r = requests.get(COINGECKO_PRICE, params=params, headers=HEADERS, timeout=TIMEOUT)
+        r = requests.get(CG_PRICE, params=p, headers=HEADERS, timeout=TIMEOUT)
         r.raise_for_status()
         return r.json()
     except Exception:
         return {}
 
-# ------------------------------------------------------------
-# Signal logic
-# ------------------------------------------------------------
+# ------------------------------- Scoring/Logic --------------------------------
 
-def classify_signal(rsi_15m, rsi_1h, macd_line, macd_signal, change_24h):
-    """
-    Return (signal_label, reason_emoji, notes)
-    Rules – pragmatisch & trader-tauglich:
-    - BUY: 1h RSI < 35  AND MACD trending up (macd_line > macd_signal)  OR 24h change <= -6%
-    - SELL: 15m RSI > 70 OR (macd_line < macd_signal AND change_24h >= +6%)
-    - INFO/ALERT: starke Bewegung | extreme RSI
-    - else: HOLD
-    """
+def breakout_flags(h, l, c, lookback=20):
+    if not c or len(c) < lookback + 2:
+        return False, False
+    last = c[-1]
+    prev_high = max(h[-(lookback+1):-1])
+    prev_low  = min(l[-(lookback+1):-1])
+    up = last > prev_high * 1.001
+    dn = last < prev_low  * 0.999
+    return up, dn
+
+def classify_and_score(rsi15, rsi1h, macd_last, macd_sig_last, macd_hist_last, macd_hist_prev,
+                        brk_up, brk_dn, ch24):
+    score = 0.0
     notes = []
 
-    macd_up = (macd_line is not None and macd_signal is not None and macd_line > macd_signal)
-    macd_down = (macd_line is not None and macd_signal is not None and macd_line < macd_signal)
+    # RSI
+    if rsi1h is not None:
+        if rsi1h < 30: score += 2; notes.append("RSI1h<30")
+        elif rsi1h < 35: score += 1; notes.append("RSI1h<35")
+        elif rsi1h > 75: score -= 2; notes.append("RSI1h>75")
+        elif rsi1h > 70: score -= 1; notes.append("RSI1h>70")
+    if rsi15 is not None:
+        if rsi15 < 35: score += 0.5
+        elif rsi15 > 70: score -= 0.5
 
-    extreme_up = (rsi_15m is not None and rsi_15m >= 75) or (rsi_1h is not None and rsi_1h >= 75)
-    extreme_down = (rsi_15m is not None and rsi_15m <= 25) or (rsi_1h is not None and rsi_1h <= 25)
-    big_move_up = change_24h is not None and change_24h >= 6.0
-    big_move_down = change_24h is not None and change_24h <= -6.0
+    # MACD Richtung + Momentum
+    if macd_last is not None and macd_sig_last is not None:
+        if macd_last > macd_sig_last:
+            score += 1; notes.append("MACD↑")
+        else:
+            score -= 1; notes.append("MACD↓")
+    if macd_hist_last is not None and macd_hist_prev is not None:
+        if macd_hist_last > macd_hist_prev:
+            score += 0.5; notes.append("Hist↑")
+        else:
+            score -= 0.5; notes.append("Hist↓")
 
-    if (rsi_1h is not None and rsi_1h < 35 and macd_up) or big_move_down:
-        return "🟢 BUY", "🚀", "Dip/Upturn"
+    # Breakouts
+    if brk_up:
+        score += 1.5; notes.append("Breakout↑")
+    if brk_dn:
+        score -= 1.5; notes.append("Breakout↓")
 
-    if (rsi_15m is not None and rsi_15m > 70) or (macd_down and big_move_up):
-        return "🔴 SELL", "📉", "Überkauft/Abdrehend"
+    # 24h Change (starke Moves)
+    if ch24 is not None:
+        if ch24 <= -6.0:
+            score += 1; notes.append("Dip")
+        elif ch24 >= 6.0:
+            score -= 1; notes.append("ExtUp")
 
-    if extreme_up or extreme_down or big_move_up or big_move_down:
-        return "ℹ️ INFO", "⚠️", "Starke Bewegung / Extrem"
+    # Label
+    if score >= 2.0:
+        label, emoji = "🟢 BUY", "🚀"
+    elif score <= -2.0:
+        label, emoji = "🔴 SELL", "📉"
+    elif abs(score) <= 1.0:
+        label, emoji = "🟡 HOLD", "⏸️"
+    else:
+        label, emoji = "ℹ️ INFO", "⚠️"
 
-    return "🟡 HOLD", "⏸️", ""
+    return label, emoji, score, ", ".join(notes)
 
-# ------------------------------------------------------------
-# Build message
-# ------------------------------------------------------------
+# ------------------------------- Message Builder ------------------------------
 
 def build_message():
-    # 1) Current prices & 24h change (CG)
+    # Preise holen
     cg_ids = [c[1] for c in COINS]
-    cg = get_cg_prices(cg_ids)
+    prices = get_prices(cg_ids)
 
-    # 2) Indicators (Binance klines)
-    rows = []
+    results = []
     state = {"generated_at": datetime.now(timezone.utc).isoformat(), "coins": []}
 
-    for symbol, cg_id, binance in COINS:
-        # 15m and 1h closes
-        closes_15m = get_binance_closes(binance, "15m", limit=300)
-        closes_1h = get_binance_closes(binance, "1h", limit=300)
+    for sym, cg_id, bin_sym in COINS:
+        k15 = get_klines(bin_sym, "15m", 300)
+        k1h = get_klines(bin_sym, "1h", 300)
 
-        rsi15 = rsi(closes_15m, RSI_PERIOD) if closes_15m else None
-        rsi1h = rsi(closes_1h, RSI_PERIOD) if closes_1h else None
-        m_line, m_sig, m_hist = macd(closes_1h, MACD_FAST, MACD_SLOW, MACD_SIGNAL) if closes_1h else (None, None, None)
+        rsi15 = rsi(k15["close"], RSI_PERIOD) if k15 else None
+        rsi1h = rsi(k1h["close"], RSI_PERIOD) if k1h else None
 
-        # price + 24h change
+        macd_line, macd_sig, macd_hist = (None, None, None)
+        hist_prev = None
+        if k1h:
+            ml, sl, h = macd_series(k1h["close"], MACD_FAST, MACD_SLOW, MACD_SIG)
+            if ml and sl and h:
+                macd_line, macd_sig, macd_hist = ml[-1], sl[-1], h[-1]
+                if len(h) >= 2:
+                    hist_prev = h[-2]
+
+        brk_up, brk_dn = (False, False)
+        atr_1h = None
+        if k1h:
+            brk_up, brk_dn = breakout_flags(k1h["high"], k1h["low"], k1h["close"], BRK_LOOKBACK)
+            atr_1h = atr(k1h["high"], k1h["low"], k1h["close"], ATR_PERIOD)
+
         price = None
         ch24 = None
-        if cg and cg_id in cg and "usd" in cg[cg_id]:
-            price = float(cg[cg_id]["usd"])
-            ch24 = float(cg[cg_id].get("usd_24h_change", 0.0))
+        if cg_id in prices:
+            price = float(prices[cg_id].get("usd", None))
+            ch24 = float(prices[cg_id].get("usd_24h_change", 0.0))
 
-        # signal
-        sig, mark, note = classify_signal(rsi15, rsi1h, m_line, m_sig, ch24)
-
-        macd_dir = "🟢 Long" if (m_line is not None and m_sig is not None and m_line >= m_sig) else ("🔴 Short" if (m_line is not None and m_sig is not None) else "—")
-
-        line = (
-            f"{mark} {symbol}: ${fmt_price(price)} | 15m RSI: {round(rsi15) if rsi15 is not None else '—'} | "
-            f"1h MACD: {macd_dir} | 24h: {fmt_pct(ch24)}\n"
-            f"➡️ Empfehlung: {sig}" + (f" ({note})" if note else "")
+        label, emoji, score, notes = classify_and_score(
+            rsi15, rsi1h, macd_line, macd_sig, macd_hist, hist_prev, brk_up, brk_dn, ch24
         )
 
-        rows.append(line)
+        macd_dir = "🟢 Long" if (macd_line is not None and macd_sig is not None and macd_line >= macd_sig) else ("🔴 Short" if (macd_line is not None and macd_sig is not None) else "—")
+        brk_txt = "↑" if brk_up else ("↓" if brk_dn else "—")
 
-        state["coins"].append({
-            "symbol": symbol,
-            "price_usd": price,
-            "change_24h": ch24,
-            "rsi_15m": rsi15,
-            "rsi_1h": rsi1h,
-            "macd_1h": {"line": m_line, "signal": m_sig, "hist": m_hist},
-            "signal": sig,
-            "note": note,
+        # TP/SL (nur bei BUY/SELL)
+        tp1 = tp2 = sl = None
+        if price and atr_1h:
+            if label.startswith("🟢"):
+                tp1 = price + 1.0 * atr_1h
+                tp2 = price + 2.0 * atr_1h
+                sl  = price - 1.5 * atr_1h
+            elif label.startswith("🔴"):
+                tp1 = price - 1.0 * atr_1h
+                tp2 = price - 2.0 * atr_1h
+                sl  = price + 1.5 * atr_1h
+
+        line = (
+            f"{emoji} {sym}: ${fmt_price(price)} • 24h {fmt_pct(ch24)} • "
+            f"RSI15 {round(rsi15) if rsi15 is not None else '—'}/RSI1h {round(rsi1h) if rsi1h is not None else '—'} • "
+            f"MACD {macd_dir} • BRK {brk_txt}\n"
+            f"➡️ {label}  (Score {score:.1f}" + (f" | {notes}" if notes else "") + ")"
+        )
+        if tp1 and tp2 and sl:
+            line += f"\n   🎯 TP1 {fmt_price(tp1)} • TP2 {fmt_price(tp2)} • 🛡️ SL {fmt_price(sl)}"
+
+        results.append({
+            "symbol": sym,
+            "line": line,
+            "score": score,
+            "label": label,
+            "price": price,
+            "tp1": tp1, "tp2": tp2, "sl": sl,
+            "metrics": {
+                "change_24h": ch24,
+                "rsi_15m": rsi15, "rsi_1h": rsi1h,
+                "macd": {"line": macd_line, "signal": macd_sig, "hist": macd_hist, "hist_prev": hist_prev},
+                "breakout_up": brk_up, "breakout_down": brk_dn,
+                "atr_1h": atr_1h,
+            }
         })
 
-    # Header & Legend
+        state["coins"].append({
+            "symbol": sym,
+            **results[-1]["metrics"],
+            "price": price,
+            "signal": label,
+            "score": score,
+            "targets": {"tp1": tp1, "tp2": tp2, "sl": sl}
+        })
+
+    # Top 3 nach absolutem Score
+    top3 = sorted(results, key=lambda x: abs(x["score"]), reverse=True)[:3]
+
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     header = (
         f"📊 Signal Snapshot — {now_utc}\n"
-        f"Basis: USD • Intervalle: 15 Min & 1 h • Quellen: Binance (Indikatoren), CoinGecko (Preis/24h)\n\n"
-    )
-    legend = (
-        "\nLegende: 🟡 Hold • ℹ️ Info ⚠️ • 🟢/🔴 Signal\n"
+        f"Basis: USD • TF: 15m/1h • Quellen: Binance (Indikatoren), CoinGecko (Preis/24h)\n"
     )
 
-    message = header + "\n\n".join(rows) + legend
+    top_block = "🔥 Top 3 Signale:\n" + "\n".join([f"  {i+1}) {r['symbol']} — {r['label']} (Score {r['score']:.1f})" for i, r in enumerate(top3)]) + "\n"
+
+    body = "\n\n".join([r["line"] for r in results])
+
+    legend = (
+        "\nLegende: 🟡 Hold • ℹ️ Info ⚠️ • 🟢/🔴 Signal • BRK=Breakout 1h\n"
+        "Levels auf Basis 1h-ATR (orientativ, kein Finanzrat)🙏"
+    )
+
+    message = f"{header}\n{top_block}\n{body}{legend}"
     return message, state
 
-# ------------------------------------------------------------
-# Main
-# ------------------------------------------------------------
+# ----------------------------------- Main -------------------------------------
 
 def main():
     msg, state = build_message()
-
-    # Write files for the workflow
     with open("message.txt", "w", encoding="utf-8") as f:
         f.write(msg.strip() + "\n")
-
     with open("signal_state.json", "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-
-    print("Message and state generated ✔")
+    print("message.txt + signal_state.json geschrieben ✔")
 
 if __name__ == "__main__":
     main()
