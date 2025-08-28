@@ -1,10 +1,20 @@
 [
-  { "symbol": "BTC",  "coingecko_id": "bitcoin",       "binance": "BTCUSDT",  "enabled": true },
-  { "symbol": "ETH",  "coingecko_id": "ethereum",      "binance": "ETHUSDT",  "enabled": true },
-  { "symbol": "SOL",  "coingecko_id": "solana",        "binance": "SOLUSDT",  "enabled": true },
-  { "symbol": "KAS",  "coingecko_id": "kaspa",         "binance": "KASUSDT",  "enabled": true },
-  { "symbol": "RNDR", "coingecko_id": "render-token",  "binance": "RNDRUSDT", "enabled": true },
-  { "symbol": "FET",  "coingecko_id": "fetch-ai",      "binance": "FETUSDT",  "enabled": true },
-  { "symbol": "SUI",  "coingecko_id": "sui",           "binance": "SUIUSDT",  "enabled": true },
-  { "symbol": "AVAX", "coingecko_id": "avalanche-2",   "binance": "AVAXUSDT", "enabled": true }
+  {
+    "symbol": "BTC",
+    "binance": "BTCUSDT",
+    "thresholds": {
+      "move":  { "5m": 0.8, "15m": 1.8, "1h": 2.5, "4h": 3.5, "1d": 5.0 },
+      "info":  { "5m": 0.2, "15m": 0.5, "1h": 1.0, "4h": 1.5, "1d": 2.0 },
+      "rsi_hot": 72,
+      "rsi_cold": 28
+    }
+  },
+  { "symbol": "ETH", "binance": "ETHUSDT" },
+  {
+    "symbol": "SOL",
+    "binance": "SOLUSDT",
+    "thresholds": {
+      "move": { "5m": 1.2, "15m": 2.2, "1h": 3.2, "4h": 4.0, "1d": 6.0 }
+    }
+  }
 ]
