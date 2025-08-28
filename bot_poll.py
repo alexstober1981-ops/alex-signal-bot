@@ -7,17 +7,13 @@ import time
 import requests
 from typing import Optional, Tuple
 
-# --- Konfiguration -----------------------------------------------------------
-
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
-DEFAULT_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()  # optional
-LAST_ID_FILE = "last_update_id"  # wird im Repo persistiert
+DEFAULT_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+LAST_ID_FILE = "last_update_id"
 
 API = f"https://api.telegram.org/bot{TOKEN}"
-TIMEOUT = 25           # Long-Poll Timeout
-SLEEP_BETWEEN = 1.5    # Pause zwischen Zyklen
-
-# --- Hilfsfunktionen ---------------------------------------------------------
+TIMEOUT = 25
+SLEEP_BETWEEN = 1.5
 
 def load_last_update_id() -> Optional[int]:
     try:
@@ -31,8 +27,32 @@ def save_last_update_id(update_id: int) -> None:
         with open(LAST_ID_FILE, "w", encoding="utf-8") as f:
             f.write(str(update_id))
     except Exception:
-        # im Actions-Runner ggf. schreibgeschützt → einfach ignorieren
         pass
+
+def tg_call(method: str, *, params=None, json_=None, timeout=15) -> dict:
+    url = f"{API}/{method}"
+    r = requests.post(url, params=params, json=json_, timeout=timeout) if json_ else \
+        requests.get(url, params=params, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+    if not data.get("ok", False):
+        raise RuntimeError(f"Telegram {method} not ok: {data}")
+    return data
+
+def get_webhook_info() -> dict:
+    try:
+        return tg_call("getWebhookInfo").get("result", {})
+    except Exception as e:
+        print(f"[INFO] getWebhookInfo fail: {e}")
+        return {}
+
+def clear_webhook_if_needed() -> None:
+    info = get_webhook_info()
+    url = (info or {}).get("url", "")
+    if url:
+        print(f"[INFO] Webhook gesetzt ({url}) -> lösche…")
+        tg_call("setWebhook", params={"url": ""}, timeout=20)
+        print("[INFO] Webhook entfernt.")
 
 def tg_get_updates(offset: Optional[int]) -> list:
     params = {"timeout": TIMEOUT}
@@ -48,40 +68,29 @@ def tg_get_updates(offset: Optional[int]) -> list:
 def tg_send_message(text: str, chat_id: Optional[str] = None) -> None:
     target = (chat_id or DEFAULT_CHAT).strip()
     if not target:
-        # Wenn kein Ziel vorhanden ist, nur ins Log schreiben,
-        # damit der Poll trotzdem nicht crasht.
-        print("[WARN] Kein TELEGRAM_CHAT_ID übergeben/gesetzt – sende nicht.")
+        print("[WARN] Kein TELEGRAM_CHAT_ID gesetzt – Nachricht wird nicht gesendet.")
         return
     payload = {"chat_id": target, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    r = requests.post(f"{API}/sendMessage", json=payload, timeout=15)
-    r.raise_for_status()
+    tg_call("sendMessage", json_=payload, timeout=15)
 
 def build_status_message() -> Tuple[str, dict]:
-    """
-    Versucht – falls vorhanden – deine generate_message.build_message() zu nutzen.
-    Wenn nicht vorhanden, gibt es einen simplen Platzhalter zurück.
-    """
     try:
         from generate_message import build_message  # type: ignore
         msg, state = build_message()
         return msg, (state or {})
     except Exception as e:
         print(f"[INFO] Fallback build_status_message: {e}")
-        # Minimal-Nachricht statt Crash:
         return "📊 Status: Bot ist online. (Fallback-Text)", {}
-
-# --- Command-Handling --------------------------------------------------------
 
 def handle_command(cmd: str, chat_id: str) -> None:
     cmd = cmd.strip().lower()
-
     if cmd in ("/start", "/help"):
         tg_send_message(
             "👋 <b>Alex Signal Bot</b>\n"
-            "Verfügbare Befehle:\n"
+            "Befehle:\n"
             "• /id – zeigt deine Chat-ID\n"
-            "• /status – sendet den aktuellen Signal-Snapshot\n"
-            "• /ping – einfache Erreichbarkeitsprobe",
+            "• /status – Signal-Snapshot\n"
+            "• /ping – Test",
             chat_id,
         )
     elif cmd == "/id":
@@ -94,29 +103,36 @@ def handle_command(cmd: str, chat_id: str) -> None:
     else:
         tg_send_message("❓ Unbekannter Befehl. Nutze /help.", chat_id)
 
-# --- Haupt-Loop --------------------------------------------------------------
-
 def main_once():
     if not TOKEN:
         raise SystemExit("TELEGRAM_TOKEN fehlt (Env).")
 
+    # >>> Fix für 409: Webhook entfernen, falls gesetzt
+    clear_webhook_if_needed()
+
     offset = load_last_update_id()
     print(f"[INFO] Starte Polling – offset={offset}")
 
-    # Ein Durchlauf (für GitHub Actions, kein Endlos-Dienst):
-    updates = tg_get_updates(offset)
-    max_update_id = offset or 0
+    # Versuch 1
+    try:
+        updates = tg_get_updates(offset)
+    except requests.HTTPError as e:
+        # Falls trotzdem 409 → noch einmal Webhook clearen und retry
+        if e.response is not None and e.response.status_code == 409:
+            print("[WARN] 409 Conflict bei getUpdates – lösche Webhook & retry…")
+            clear_webhook_if_needed()
+            updates = tg_get_updates(offset)  # Retry
+        else:
+            raise
 
+    max_update_id = offset or 0
     for upd in updates:
         max_update_id = max(max_update_id, upd.get("update_id", 0))
-
         msg = upd.get("message") or upd.get("edited_message") or {}
         text = (msg.get("text") or "").strip()
         chat_id = str((msg.get("chat", {}) or {}).get("id", ""))
-
         if not text or not chat_id:
             continue
-
         if text.startswith("/"):
             print(f"[INFO] Command von {chat_id}: {text}")
             try:
@@ -133,6 +149,5 @@ if __name__ == "__main__":
     try:
         main_once()
     except requests.RequestException as e:
-        # Netzwerkfehler sollen den Job nicht hässlich stacktracen
         print(f"[ERROR] Netzwerkfehler: {e}")
         raise
