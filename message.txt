@@ -1,10 +1,10 @@
-📊 Signal Snapshot — 2025-08-28T10:50:10 UTC
+📊 Signal Snapshot — 2025-08-28T11:26:03 UTC
 Basis: USD • Intervall: 60 Min • Quelle: CoinGecko
 
-ℹ️ BTC: $112,982.00 • 15m -0.05% • 24h +1.74% — Info
-ℹ️ ETH: $4,602.39 • 15m -0.16% • 24h +0.42% — Info
-📈 SOL: $213.21 • 15m -0.14% • 24h +4.56% — Signal
-ℹ️ AVAX: $24.48 • 15m -0.16% • 24h +0.37% — Info
+ℹ️ BTC: $112,973.00 • 15m -0.01% • 24h +1.61% — Info
+ℹ️ ETH: $4,592.32 • 15m -0.22% • 24h -0.04% — Info
+📈 SOL: $213.01 • 15m -0.09% • 24h +4.10% — Signal
+ℹ️ AVAX: $24.42 • 15m -0.25% • 24h -0.25% — Info
 
 
 Legende: 🟡 Hold • ℹ️ Info • 📈/📉 Signal • 🚀/🔻 Alert
