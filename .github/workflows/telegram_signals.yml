@@ -3,10 +3,7 @@ name: Telegram Signals
 on:
   schedule:
     - cron: "*/15 * * * *"   # alle 15 Minuten
-  workflow_dispatch:         # manueller Start möglich
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
   run:
@@ -19,13 +16,16 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install --upgrade requests
+        run: |
+          pip install --upgrade requests pandas numpy ta
 
-      - name: Generate message
+      - name: Generate
+        env:
+          COOLDOWN_MINUTES: "60"
         run: python generate_message.py
 
-      - name: Send to Telegram
+      - name: Send
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python telegram_send.py
+        run: python -u telegram_send.py
