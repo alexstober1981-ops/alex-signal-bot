@@ -2,8 +2,11 @@ name: Telegram Signals
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # alle 15 Minuten
+    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run:
@@ -17,15 +20,29 @@ jobs:
 
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install --upgrade requests pandas numpy ta
 
       - name: Generate
         env:
           COOLDOWN_MINUTES: "60"
-        run: python generate_message.py
+        run: python -u generate_message.py
 
-      - name: Send
+      - name: Commit state/log (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain -- signal_state.json signals_log.csv)" ]]; then
+            git add signal_state.json signals_log.csv
+            git commit -m "state/log: update $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          else
+            echo "No state/log change."
+          fi
+
+      - name: Send to Telegram (main + alerts)
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOKEN:        ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:      ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}  # optional
         run: python -u telegram_send.py
