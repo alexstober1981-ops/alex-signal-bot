@@ -2,437 +2,438 @@
 # -*- coding: utf-8 -*-
 
 """
-Pro-Ultra Signal-Generator (mit Filtersupport aus coins.json)
-- TFs: 5m, 15m, 1h, 4h, 1d
-- Indikatoren: RSI(14), EMA50/EMA200, MACD(12/26/9)
-- Per-Coin thresholds + filters (RSI-Band, EMA200-Trend, MACD-Confirm)
-- Alerts: MOVE / MACD-Cross / EMA200-Break / RSI-Extrem (mit Cooldown)
-- Outputs:
-  • message.txt  (Übersicht)
-  • alerts.txt   (nur Alerts – optional anderer Chat)
-  • signal_state.json (Cooldown/Meta)
-  • signals_log.csv (CSV-Log der Haupt-Metriken)
+Alex Signal Bot – generate_message.py (Profi-Version, 2025-08)
+- Fallback-Provider: binance.us -> binance.com -> bybit
+- Robust gegen 451 / Rate-Limits
+- State/Cooldown, CSV-Logging, getrennte Alerts/Message
+- Kompatibel zu bestehendem Repo-Layout
 """
 
-import os, sys, json, time, math, csv
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Tuple
+import os
+import json
+import math
+import time
+import csv
+import sys
+from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Tuple, Any, Optional
 
 import requests
-import pandas as pd
-import numpy as np
-from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator, MACD
 
-# ---------------- Config ----------------
-TIMEFRAMES: List[str] = ["5m", "15m", "1h", "4h", "1d"]
-PRIMARY_TF = "15m"
-KLIMIT = 300
+# ----------------------------
+# Pfade / Defaults
+# ----------------------------
+ROOT = os.path.dirname(os.path.abspath(__file__))
+MSG_PATH = os.path.join(ROOT, "message.txt")
+ALERTS_PATH = os.path.join(ROOT, "alerts.txt")
+STATE_PATH = os.path.join(ROOT, "signal_state.json")
+COINS_PATH = os.path.join(ROOT, "coins.json")
+CSV_PATH = os.path.join(ROOT, "signal_log.csv")
 
-STATE_PATH  = "signal_state.json"
-MSG_PATH    = "message.txt"
-ALERTS_PATH = "alerts.txt"
-CSV_LOG     = "signals_log.csv"
+# Cooldown aus Workflow (Minuten)
+COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "0"))
 
-# Defaults (werden pro Coin via coins.json überschrieben)
-DEFAULT_THRESHOLDS = {
-    "move": {"5m": 1.0, "15m": 2.0, "1h": 3.0, "4h": 4.0, "1d": 5.0, "24h": 5.0}
+# HTTP
+_DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; AlexSignalBot/1.0; +https://github.com)"
 }
-DEFAULT_FILTERS = {
-    "rsi":   { "min": None, "max": None },   # None = kein Filter
-    "ema200":{ "trend": "any" },             # any|above|below
-    "macd":  { "confirm": False }            # True = MACD-Cross Pflicht (auf PRIMARY_TF)
+HTTP_TIMEOUT = 15
+RETRY_DELAY = (0.6, 1.2, 2.0)  # progressive kurze Delays
+
+# Benötigte Kerzen pro Intervall (für Metriken)
+NEEDED_KLINES = {
+    "1m": 120,
+    "3m": 160,
+    "5m": 300,
+    "15m": 300,
 }
 
-COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "60"))
-UA = {"User-Agent": "alex-pro-crypto/filters/1.0"}
+# ----------------------------
+# Utilities
+# ----------------------------
 
-# ------------- HTTP with retry/backoff -------------
-def http_get(url: str, params: dict, timeout=20, tries=4, backoff=2.0):
-    delay = 1.5
-    for i in range(tries):
-        try:
-            r = requests.get(url, params=params, timeout=timeout, headers=UA)
-            if r.status_code == 429:
-                try:
-                    ra = float(r.json().get("retry_after", delay))
-                except Exception:
-                    ra = delay
-                time.sleep(ra); continue
-            r.raise_for_status()
-            return r
-        except Exception:
-            if i == tries - 1:
-                raise
-            time.sleep(delay)
-            delay *= backoff
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
-# ------------- IO helpers -------------
-def load_coins() -> List[Dict[str, Any]]:
-    if os.path.exists("coins.json"):
-        with open("coins.json","r",encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list) and data:
-            return data
-    # Fallback, falls coins.json fehlt
-    return [{"symbol":"BTC","binance":"BTCUSDT"},
-            {"symbol":"ETH","binance":"ETHUSDT"},
-            {"symbol":"SOL","binance":"SOLUSDT"}]
+def ts_to_dt(ms: int) -> datetime:
+    # Binance/Bybit liefern ms
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
 
-def load_state() -> Dict[str, Any]:
-    if os.path.exists(STATE_PATH):
-        try:
-            with open(STATE_PATH,"r",encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"alerts": {}}  # alerts[SYM][key]=ts
+def dt_to_str(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+def read_json(path: str, default: Any) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def write_text(path: str, text: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
 
 def save_state(state: Dict[str, Any]) -> None:
-    with open(STATE_PATH,"w",encoding="utf-8") as f:
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-def ensure_csv_header():
-    if not os.path.exists(CSV_LOG):
-        with open(CSV_LOG,"w",newline="",encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow([
-                "ts_utc","symbol","tf","close","pct_vs_prev",
-                "rsi","ema200_dist","macd_dir","label","alerts_count"
-            ])
+def load_state() -> Dict[str, Any]:
+    return read_json(STATE_PATH, default={})
 
-# ------------- Data fetch -------------
-def binance_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
-    url = "https://api.binance.com/api/v3/klines"
-    r = http_get(url, {"symbol":symbol, "interval":interval, "limit":limit})
-    cols = [
-        "open_time","open","high","low","close","volume",
-        "close_time","quote_asset_volume","n_trades",
-        "taker_buy_base","taker_buy_quote","ignore"
-    ]
-    df = pd.DataFrame(r.json(), columns=cols)
-    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
-    for c in ["open","high","low","close","volume"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
+def append_csv_row(ts: datetime, symbol: str, prim_sig: str, extra: Dict[str, Any]) -> None:
+    """
+    Leichtgewichtiges CSV-Log (optional). Erzeugt Datei bei Bedarf.
+    """
+    row = {
+        "timestamp": dt_to_str(ts),
+        "symbol": symbol,
+        "primary_signal": prim_sig,
+        **extra
+    }
+    exists = os.path.exists(CSV_PATH)
+    with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=row.keys())
+        if not exists:
+            w.writeheader()
+        w.writerow(row)
 
-def binance_24h_change(symbol: str) -> float:
-    url = "https://api.binance.com/api/v3/ticker/24hr"
-    r = http_get(url, {"symbol": symbol}, timeout=15)
-    j = r.json()
-    try:
-        return float(j.get("priceChangePercent", 0.0))
-    except Exception:
-        return 0.0
+# ----------------------------
+# Markt-API – Fallback-Fetch
+# ----------------------------
 
-# ------------- Indicators -------------
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty: return df
-    close = df["close"]
-    out = df.copy()
-    out["rsi"] = RSIIndicator(close, window=14).rsi()
-    out["ema50"] = EMAIndicator(close, window=50).ema_indicator()
-    out["ema200"] = EMAIndicator(close, window=200).ema_indicator()
-    macd_obj = MACD(close)
-    out["macd"] = macd_obj.macd()
-    out["macd_signal"] = macd_obj.macd_signal()
+# Bybit Intervalmap (für 1m/3m/5m/15m ausreichend)
+_BYBIT_INTERVAL = {"1m": "1", "3m": "3", "5m": "5", "15m": "15"}
+
+def _http_get(url: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+    last_exc: Optional[Exception] = None
+    for i, delay in enumerate(([0.0] + list(RETRY_DELAY))):
+        if delay:
+            time.sleep(delay)
+        try:
+            r = requests.get(url, params=params, headers=_DEFAULT_HEADERS, timeout=HTTP_TIMEOUT)
+            return r
+        except Exception as e:
+            last_exc = e
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("HTTP GET failed without exception")
+
+def _binance_klines(base: str, pair: str, interval: str, limit: int) -> List[List[Any]]:
+    # base in {"us","com"}
+    host = "api.binance.us" if base == "us" else "api.binance.com"
+    url = f"https://{host}/api/v3/klines"
+    params = {"symbol": pair, "interval": interval, "limit": limit}
+    r = _http_get(url, params)
+    # 451 -> jurist. Blockade / Geo
+    if r.status_code == 451:
+        raise requests.HTTPError("451 Unavailable For Legal Reasons", response=r)
+    r.raise_for_status()
+    return r.json()  # Liste von [open_time, open, high, low, close, volume, ... ]
+
+def _bybit_klines(pair: str, interval: str, limit: int) -> List[List[Any]]:
+    # Bybit v5 public kline
+    # pair z.B. BTCUSDT -> symbol: BTCUSDT, category: spot
+    url = "https://api.bybit.com/v5/market/kline"
+    params = {
+        "category": "spot",
+        "symbol": pair,
+        "interval": _BYBIT_INTERVAL.get(interval, "1"),
+        "limit": str(limit),
+    }
+    r = _http_get(url, params)
+    r.raise_for_status()
+    data = r.json()
+    if data.get("retCode") != 0:
+        raise RuntimeError(f"Bybit error: {data.get('retMsg')}")
+    # Bybit liefert: list of [start, open, high, low, close, volume, turnover]
+    out = []
+    for c in data.get("result", {}).get("list", []):
+        # c[0] = start (ms)
+        out.append([int(c[0]), c[1], c[2], c[3], c[4], c[5]])
+    out.reverse()  # bybit returns newest-first
     return out
 
-# ------------- Helpers -------------
-def pct_last_step(df: pd.DataFrame) -> float:
-    if len(df) < 2: return 0.0
-    c0 = float(df.iloc[-2]["close"])
-    c1 = float(df.iloc[-1]["close"])
-    return (c1/c0 - 1.0) * 100.0 if c0 else 0.0
-
-def macd_dir_str(df: pd.DataFrame) -> str:
-    if len(df) < 1: return "—"
-    last = df.iloc[-1]
-    return "↑" if float(last["macd"]) >= float(last["macd_signal"]) else "↓"
-
-def fmt_usd(x: float) -> str:
-    if x >= 1: return f"${x:,.2f}"
-    return f"${x:.4f}"
-
-def sign_pct(x: float) -> str:
-    return f"{x:+.2f}%"
-
-# ------------- Thresholds/Filters merge -------------
-def merged_thresholds(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    th = json.loads(json.dumps(DEFAULT_THRESHOLDS))
-    user = cfg.get("thresholds")
-    if isinstance(user, dict):
-        # shallow-merge dicts
-        for k, v in user.items():
-            if isinstance(v, dict) and k in th:
-                th[k].update(v)
+def fetch_klines(pair: str, interval: str, limit: int) -> List[Tuple[datetime, float, float, float, float]]:
+    """
+    Holt OHLC-Kerzen. Reihenfolge: binance.us -> binance.com -> bybit (Fallback).
+    Gibt Liste [(open_time_dt, open, high, low, close)] zurück.
+    """
+    last_error = None
+    providers = (("us", True), ("com", True), ("bybit", False))
+    for base, is_binance in providers:
+        try:
+            if is_binance:
+                raw = _binance_klines(base, pair, interval, limit)
+                out = []
+                for c in raw:
+                    # Validierung: 6 Felder vorhanden
+                    if len(c) < 6:
+                        continue
+                    ot = ts_to_dt(int(c[0]))
+                    o, h, l, cl = float(c[1]), float(c[2]), float(c[3]), float(c[4])
+                    if any(math.isnan(x) for x in (o, h, l, cl)):
+                        continue
+                    out.append((ot, o, h, l, cl))
+                if len(out) >= max(NEEDED_KLINES.get(interval, 120), 50):
+                    return out
+                else:
+                    raise RuntimeError(f"Too few klines from binance.{base}: {len(out)}")
             else:
-                th[k] = v
-    # Ensure keys
-    th.setdefault("move", {}).setdefault("24h", DEFAULT_THRESHOLDS["move"]["1d"])
-    return th
-
-def merged_filters(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    flt = json.loads(json.dumps(DEFAULT_FILTERS))
-    user = cfg.get("filters")
-    if isinstance(user, dict):
-        # recursive-ish merge
-        for k, v in user.items():
-            if isinstance(v, dict) and k in flt:
-                flt[k].update(v)
-            else:
-                flt[k] = v
-    # normalize values
-    rsi_min = flt["rsi"].get("min"); rsi_max = flt["rsi"].get("max")
-    flt["rsi"]["min"] = None if rsi_min in ("", None) else float(rsi_min)
-    flt["rsi"]["max"] = None if rsi_max in ("", None) else float(rsi_max)
-    tr = str(flt["ema200"].get("trend", "any")).lower()
-    flt["ema200"]["trend"] = tr if tr in ("any","above","below") else "any"
-    flt["macd"]["confirm"] = bool(flt["macd"].get("confirm", False))
-    return flt
-
-# ------------- Cooldown keys -------------
-def make_key(tf: str, kind: str, direction: str) -> str:
-    return f"{tf}:{kind}:{direction}"
-
-def allowed(state: Dict[str, Any], sym: str, key: str) -> bool:
-    last = int(state.get("alerts", {}).get(sym, {}).get(key, 0))
-    return (int(time.time()) - last) >= COOLDOWN_MINUTES * 60
-
-def remember(state: Dict[str, Any], sym: str, key: str) -> None:
-    state.setdefault("alerts", {}).setdefault(sym, {})[key] = int(time.time())
-
-# ------------- Filterprüfung -------------
-def passes_filters_primary(df_primary: pd.DataFrame, flt: Dict[str, Any]) -> bool:
-    """Prüft RSI-Band, EMA200-Trend und optional MACD-Confirm auf PRIMARY_TF."""
-    if len(df_primary) < 2: 
-        return True  # nichts zu filtern
-    last = df_primary.iloc[-1]
-    prev = df_primary.iloc[-2]
-    price = float(last["close"])
-    ema200_now  = float(last["ema200"])
-    ema200_prev = float(prev["ema200"])
-    macd_now    = float(last["macd"])
-    macds_now   = float(last["macd_signal"])
-    macd_prev   = float(prev["macd"])
-    macds_prev  = float(prev["macd_signal"])
-    rsi_now     = float(last["rsi"])
-
-    # RSI-Band
-    rmin = flt["rsi"]["min"]; rmax = flt["rsi"]["max"]
-    if rmin is not None and rsi_now < rmin: 
-        return False
-    if rmax is not None and rsi_now > rmax: 
-        return False
-
-    # EMA200-Trend
-    trend = flt["ema200"]["trend"]
-    if trend == "above":
-        if not (ema200_now and price > ema200_now): 
-            return False
-    elif trend == "below":
-        if not (ema200_now and price < ema200_now):
-            return False
-
-    # MACD-Confirm (Cross)
-    if flt["macd"]["confirm"]:
-        cross_up = (macd_now > macds_now) and (macd_prev <= macds_prev)
-        cross_dn = (macd_now < macds_now) and (macd_prev >= macds_prev)
-        if not (cross_up or cross_dn):
-            return False
-
-    return True
-
-# ------------- Analyse pro Coin -------------
-def analyze_coin(sym: str, pair: str, th: Dict[str, Any], flt: Dict[str, Any]) -> Tuple[List[str], List[str], Dict[str, Any]]:
-    # alle TFs laden
-    tfs: Dict[str, pd.DataFrame] = {}
-    for tf in TIMEFRAMES:
-        d = add_indicators(binance_klines(pair, tf, KLIMIT))
-        tfs[tf] = d
-
-    # 24h change
-    ch24 = binance_24h_change(pair)
-
-    # PRIMARY_TF snapshot
-    dfp = tfs[PRIMARY_TF]
-    last = dfp.iloc[-1]
-    prev = dfp.iloc[-2] if len(dfp) > 1 else last
-    price = float(last["close"])
-    change_p = pct_last_step(dfp)
-    rsi_p = float(last["rsi"])
-    ema200 = float(last["ema200"])
-    macd_now = float(last["macd"])
-    macds_now = float(last["macd_signal"])
-    ema_dist = ((price/ema200) - 1.0) * 100.0 if ema200 else float("nan")
-
-    # Summary-Zeilen
-    trend = "📈" if change_p >= 0 else "📉"
-    header = f"{sym}: {fmt_usd(price)} • {PRIMARY_TF} {sign_pct(change_p)} • 24h {sign_pct(ch24)}"
-    indi   = f"{trend} RSI {rsi_p:.0f} • EMA200 {sign_pct(ema_dist)} • MACD {'↑' if macd_now>=macds_now else '↓'}"
-    mtf    = "MTF Δ: " + " • ".join([f"{tf} {sign_pct(pct_last_step(tfs[tf]))}" for tf in TIMEFRAMES])
-
-    # Alerts
-    alerts: List[str] = []
-    info_hit = False
-
-    move_t = th["move"]
-    th_24h = float(move_t.get("24h", DEFAULT_THRESHOLDS["move"]["1d"]))
-
-    # 24h starker Move => globaler Alert (unabhängig von Filtern)
-    if abs(ch24) >= th_24h:
-        alerts.append(f"🚨 24h MOVE {sign_pct(ch24)}")
-
-    # Pro-TF Bewegungen + Indikator-Events – ABER: Filters greifen (PRIMARY-TF) für MOVE/MACD/EMA/RSI
-    # (Filter sind "Bestätiger"; 24h-Alert bleibt immer durchlässig)
-    primary_pass = passes_filters_primary(dfp, flt)
-
-    for tf in TIMEFRAMES:
-        d = tfs[tf]
-        if len(d) < 3: 
+                raw = _bybit_klines(pair, interval, limit)
+                out = []
+                for c in raw:
+                    if len(c) < 6:
+                        continue
+                    ot = ts_to_dt(int(c[0]))
+                    o, h, l, cl = float(c[1]), float(c[2]), float(c[3]), float(c[4])
+                    if any(math.isnan(x) for x in (o, h, l, cl)):
+                        continue
+                    out.append((ot, o, h, l, cl))
+                if len(out) >= max(NEEDED_KLINES.get(interval, 120), 50):
+                    return out
+                else:
+                    raise RuntimeError(f"Too few klines from bybit: {len(out)}")
+        except Exception as e:
+            last_error = e
+            # bei 451 (nur binance) einfach nächsten Provider versuchen
+            # andere HTTP-Fehler ebenfalls weiter zum Fallback
             continue
-        pct = pct_last_step(d)
-        rsi = float(d.iloc[-1]["rsi"])
-        ema_now = float(d.iloc[-1]["ema200"])
-        ema_prev= float(d.iloc[-2]["ema200"])
-        macd_now_t = float(d.iloc[-1]["macd"])
-        macds_now_t= float(d.iloc[-1]["macd_signal"])
-        macd_prev_t= float(d.iloc[-2]["macd"])
-        macds_prev_t=float(d.iloc[-2]["macd_signal"])
-        price_now = float(d.iloc[-1]["close"])
-        price_prev= float(d.iloc[-2]["close"])
+    raise RuntimeError(f"All providers failed for {pair} {interval}: {last_error}")
 
-        # MOVE -> nur wenn Filter auf PRIMARY_TF bestehen (primary_pass)
-        if primary_pass and tf in move_t and abs(pct) >= float(move_t[tf]):
-            alerts.append(f"🚨 MOVE {tf} {sign_pct(pct)}")
+# ----------------------------
+# Analyse / Metriken
+# ----------------------------
 
-        # MACD Crossover (als Ereignis) – erfordert primary_pass
-        if primary_pass and (macd_now_t > macds_now_t and macd_prev_t <= macds_prev_t):
-            alerts.append(f"⚡ MACD Cross ↑ ({tf})")
-        if primary_pass and (macd_now_t < macds_now_t and macd_prev_t >= macds_prev_t):
-            alerts.append(f"⚡ MACD Cross ↓ ({tf})")
+def pct(a: float, b: float) -> float:
+    if b == 0:
+        return 0.0
+    return (a - b) / b * 100.0
 
-        # EMA200 Break – erfordert primary_pass
-        if primary_pass and (price_now > ema_now and price_prev <= ema_prev):
-            alerts.append(f"🧭 EMA200 Break ↑ ({tf})")
-        if primary_pass and (price_now < ema_now and price_prev >= ema_prev):
-            alerts.append(f"🧭 EMA200 Break ↓ ({tf})")
+def ema(values: List[float], length: int) -> List[float]:
+    if not values or length <= 1:
+        return values or []
+    k = 2.0 / (length + 1.0)
+    out = [values[0]]
+    for v in values[1:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return out
 
-        # RSI Extrem – erfordert primary_pass
-        rmin = flt["rsi"]["min"]; rmax = flt["rsi"]["max"]
-        if primary_pass:
-            if rmax is not None and rsi >= rmax:
-                alerts.append(f"🔥 RSI {rsi:.0f} ({tf})")
-            if rmin is not None and rsi <= rmin:
-                alerts.append(f"❄️ RSI {rsi:.0f} ({tf})")
+def atr(hlc: List[Tuple[float, float, float]], length: int = 14) -> float:
+    # hlc: [(high, low, close_prev), ...] -> TR gemittelt
+    if len(hlc) < length + 1:
+        return 0.0
+    trs = []
+    for i in range(1, len(hlc)):
+        h, l, cp = hlc[i][0], hlc[i][1], hlc[i - 1][2]
+        tr = max(h - l, abs(h - cp), abs(l - cp))
+        trs.append(tr)
+    if not trs:
+        return 0.0
+    return sum(trs[-length:]) / float(length)
 
-        # Info-Hinweis (falls kein Alert), wenn MOVE nahe an Schwelle (50%) – nur PRIMARY_TF
-        if tf == PRIMARY_TF and not alerts:
-            thr = float(move_t.get(PRIMARY_TF, 999))
-            if abs(pct) >= 0.5 * thr:
-                info_hit = True
+def analyze_coin(
+    symbol: str,
+    pair: str,
+    thresholds: Dict[str, Any],
+    intervals: Tuple[str, str] = ("5m", "15m"),
+) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+    """
+    Liefert:
+      - summary_line (Text für message.txt)
+      - raw_alerts (dict) – Flags/Details für Alerts
+      - metrics (dict) – berechnete Metriken
+    """
+    # 1) Klines laden
+    k1 = fetch_klines(pair, intervals[0], NEEDED_KLINES[intervals[0]])
+    k2 = fetch_klines(pair, intervals[1], NEEDED_KLINES[intervals[1]])
 
-    # Label
-    label = "HOLD"; emoji = "🟡"
-    if alerts:
-        label = "Alert"; emoji = "🚀" if change_p >= 0 else "🔻"
-    elif info_hit:
-        label = "Info"; emoji = "ℹ️"
+    def closes(kl: List[Tuple[datetime, float, float, float, float]]) -> List[float]:
+        return [c[4] for c in kl]
 
-    summary = [f"{emoji} {header} — {label}", mtf, indi]
+    c1 = closes(k1)
+    c2 = closes(k2)
 
-    # Metriken (für CSV)
+    # 2) Prozentveränderungen
+    ch_5m = pct(c1[-1], c1[-6]) if len(c1) >= 6 else 0.0
+    ch_15m = pct(c2[-1], c2[-2]) if len(c2) >= 2 else 0.0
+    ch_24h = 0.0  # optional: könnte via 24h-ticker ergänzt werden
+
+    # 3) Volatilität / ATR grob (auf 5m)
+    hlc = [(h, l, c1[i - 1] if i > 0 else c1[0]) for i, (_, _, h, l, _) in enumerate(k1)]
+    atr_val = atr(hlc, 14)
+    ema_fast = ema(c1, 9)
+    ema_slow = ema(c1, 21)
+    trend_up = len(ema_fast) > 0 and len(ema_slow) > 0 and ema_fast[-1] > ema_slow[-1]
+
+    # 4) Schwellen anwenden
+    th = thresholds or {}
+    move_th = th.get("move", {})
+    info_th = th.get("info", {})
+    alert_th = th.get("alert", {})
+
+    # Defaults (konservativ)
+    def_th_move_5 = 0.8
+    def_th_move_15 = 1.2
+    def_th_info_5 = 1.2
+    def_th_info_15 = 2.0
+    def_th_alert_5 = 2.0
+    def_th_alert_15 = 3.0
+
+    sig = "HOLD"
+    emoji = "🟡"
+    level = "hold"
+
+    # Alerts zuerst prüfen (höchste Priorität)
+    if abs(ch_5m) >= float(alert_th.get("5m", def_th_alert_5)) or abs(ch_15m) >= float(alert_th.get("15m", def_th_alert_15)):
+        sig = "ALERT"
+        emoji = "🚀" if (ch_5m > 0 or ch_15m > 0) else "🔻"
+        level = "alert"
+    # Dann Info
+    elif abs(ch_5m) >= float(info_th.get("5m", def_th_info_5)) or abs(ch_15m) >= float(info_th.get("15m", def_th_info_15)):
+        sig = "INFO"
+        emoji = "ℹ️"
+        level = "info"
+    # Dann Signal (leichter)
+    elif abs(ch_5m) >= float(move_th.get("5m", def_th_move_5)) or abs(ch_15m) >= float(move_th.get("15m", def_th_move_15)):
+        sig = "SIGNAL"
+        emoji = "📈" if (ch_5m > 0 or ch_15m > 0) else "📉"
+        level = "signal"
+
+    # 5) Formatierung einer Zeile
+    price = c1[-1]
+    summary = f"{emoji} {symbol}: ${price:,.2f} • 15m {ch_15m:+.2f}% • 24h {ch_24h:+.2f}% — {sig}"
+
+    raw_alerts = {
+        "symbol": symbol,
+        "level": level,
+        "sig": sig,
+        "ch_5m": round(ch_5m, 2),
+        "ch_15m": round(ch_15m, 2),
+        "trend_up": trend_up,
+    }
     metrics = {
         "price": price,
-        "pct_primary": change_p,
-        "rsi": rsi_p,
-        "ema200_dist": ema_dist,
-        "macd_dir": "UP" if macd_now>=macds_now else "DOWN",
-        "alerts_count": len(alerts),
-        "label": label
+        "atr": atr_val,
+        "ema9": ema_fast[-1] if ema_fast else None,
+        "ema21": ema_slow[-1] if ema_slow else None,
     }
-    return summary, alerts, metrics
+    return summary, raw_alerts, metrics
 
-# ------------- Build & Write -------------
-def write_text(path: str, content: str):
-    with open(path,"w",encoding="utf-8") as f:
-        f.write((content.strip() + "\n") if content else "")
+# ----------------------------
+# Building messages
+# ----------------------------
 
-def append_csv_row(ts: str, sym: str, tf: str, metrics: Dict[str, Any]):
-    with open(CSV_LOG,"a",newline="",encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow([ts, sym, tf, metrics["price"], metrics["pct_primary"],
-                    metrics["rsi"], metrics["ema200_dist"], metrics["macd_dir"],
-                    metrics["label"], metrics["alerts_count"]])
+def load_coins() -> List[Dict[str, Any]]:
+    data = read_json(COINS_PATH, [])
+    if not isinstance(data, list):
+        raise ValueError("coins.json muss eine Liste sein")
+    out = []
+    for c in data:
+        sym = c.get("symbol")
+        pair = c.get("binance") or c.get("pair")  # backward-compat
+        th = c.get("thresholds", {})
+        if not sym or not pair:
+            continue
+        out.append({"symbol": sym, "pair": pair, "thresholds": th})
+    if not out:
+        raise ValueError("coins.json ist leer oder ungültig")
+    return out
 
-def build_messages():
+def cooldown_ok(state: Dict[str, Any], symbol: str, now: datetime) -> bool:
+    if COOLDOWN_MINUTES <= 0:
+        return True
+    sym_state = state.get("coins", {}).get(symbol, {})
+    last_ts = sym_state.get("last_ts")
+    if not last_ts:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last_ts)
+    except Exception:
+        return True
+    return (now - last_dt) >= timedelta(minutes=COOLDOWN_MINUTES)
+
+def mark_sent(state: Dict[str, Any], symbol: str, now: datetime, level: str) -> None:
+    state.setdefault("coins", {}).setdefault(symbol, {})
+    state["coins"][symbol]["last_ts"] = now.isoformat()
+    state["coins"][symbol]["last_level"] = level
+
+def build_messages() -> None:
+    now = utc_now()
     coins = load_coins()
     state = load_state()
-    ensure_csv_header()
 
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines: List[str] = [f"📊 Signal Snapshot — {ts}", "Basis: USD • TFs: 5m/15m/1h/4h/1d • Quelle: Binance", ""]
+    lines: List[str] = []
     alert_lines_all: List[str] = []
+    legend = "Legende: 🟡 Hold • ℹ️ Info • 📈/📉 Signal • 🚀/🔻 Alert"
 
-    for cfg in coins:
-        sym  = cfg["symbol"].upper()
-        pair = cfg.get("binance", f"{sym}USDT").upper()
-        th   = merged_thresholds(cfg)
-        flt  = merged_filters(cfg)
+    header = f"📊 Signal Snapshot — {now.strftime('%Y-%m-%d %H:%M')} UTC\nBasis: USD • Intervall: 15 Min • Quelle: Binance/Bybit"
+    lines.append(header)
+    lines.append("")
 
-        summary, raw_alerts, metrics = analyze_coin(sym, pair, th, flt)
+    for c in coins:
+        sym, pair, th = c["symbol"], c["pair"], c.get("thresholds", {})
+        try:
+            if not cooldown_ok(state, sym, now):
+                # Im Cooldown: nur HOLD-Zeile (optional markierbar)
+                lines.append(f"🟡 {sym}: — (Cooldown aktiv) — HOLD")
+                continue
 
-        # Cooldown pro Alert-Event
-        filtered = []
-        for a in raw_alerts:
-            # Richtung + TF + Art extrahieren
-            direction = "UP" if "↑" in a or ("MOVE" in a and "-" not in a) else "DOWN"
-            if "MOVE" in a:
-                kind="MOVE"; tf=a.split("MOVE ")[1].split(" ")[0]
-            elif "MACD" in a:
-                kind="MACD"; tf=a.split("(")[1].split(")")[0]
-            elif "EMA200" in a:
-                kind="EMA200"; tf=a.split("(")[1].split(")")[0]
-            elif "RSI" in a:
-                kind="RSI"; tf=a.split("(")[1].split(")")[0]
-            else:
-                kind="GEN"; tf=PRIMARY_TF
+            summary, raw_alerts, metrics = analyze_coin(sym, pair, th, intervals=("5m", "15m"))
 
-            key = f"{tf}:{kind}:{direction}"
-            if allowed(state, sym, key):
-                remember(state, sym, key)
-                filtered.append(f"{sym} • {a}")
+            # Alerts sammeln
+            lvl = raw_alerts["level"]
+            if lvl in ("signal", "info", "alert"):
+                alert_lines_all.append(summary)
 
-        # Summary block
-        lines += summary
-        if filtered:
-            lines.append("🚨 Alerts:")
-            lines += [f"• {x}" for x in filtered]
-        lines.append("")
+            # CSV (minimal)
+            try:
+                append_csv_row(
+                    ts=now,
+                    symbol=sym,
+                    prim_sig=raw_alerts["sig"],
+                    extra={"ch5m": raw_alerts["ch_5m"], "ch15m": raw_alerts["ch_15m"], "trend_up": raw_alerts["trend_up"]},
+                )
+            except Exception:
+                pass
 
-        alert_lines_all.extend(filtered)
+            # State aktualisieren
+            if lvl in ("signal", "info", "alert"):
+                mark_sent(state, sym, now, lvl)
 
-        # CSV Log
-        append_csv_row(ts, sym, PRIMARY_TF, metrics)
+            # In Liste aufnehmen
+            lines.append(summary)
 
-    # Übersicht
+        except Exception as e:
+            # Fehler je Coin nicht alles abbrechen lassen
+            lines.append(f"🟡 {sym}: (Datenfehler) — HOLD")
+            # optional: print ins Protokoll
+            print(f"[{sym}] ERROR: {e}", file=sys.stderr)
+
+    # Übersicht/Legende
     if not alert_lines_all:
-        lines.append("🟡 Keine nennenswerte Bewegung über den Alert-Schwellen.")
+        lines.append("")
+        lines.append("🟡 Keine nennenswerte Bewegung über den Info-Schwellen.")
+        lines.append("")
+        lines.append(legend)
 
+    # Schreiben
     write_text(MSG_PATH, "\n".join(lines))
 
-    # Alerts
     alerts_text = ""
     if alert_lines_all:
-        alerts_text = "🚨 Alerts — " + ts + "\n" + "\n".join([f"• {x}" for x in alert_lines_all])
+        alerts_text = "🚨 Alerts\n" + "\n".join(alert_lines_all)
     write_text(ALERTS_PATH, alerts_text)
 
     save_state(state)
 
+# ----------------------------
+# Main
+# ----------------------------
+
 def main():
     try:
         build_messages()
-        print("message.txt + alerts.txt + state + csv geschrieben ✔")
+        print("message.txt + alerts.txt erstellt.")
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         raise
