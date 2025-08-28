@@ -2,275 +2,258 @@
 # -*- coding: utf-8 -*-
 
 """
-Alex Signal Bot – generate_message.py
--------------------------------------
-Baut die Telegram-Nachricht und pflegt signal_state.json.
-
-Robust:
-- akzeptiert state["coins"] als Dict ODER Liste und normalisiert.
-- liest coins.json als ["BTC","ETH",...] ODER mit Objekten.
-- COOLDOWN_MINUTES via Env steuerbar (Standard: 15).
+Builds a pro-grade crypto signal message.
+- Source: Binance klines (15m) + 24h ticker
+- Indicators: RSI(14), EMA50/EMA200, MACD
+- Alert logic incl. cooldown persisted in signal_state.json
+- Output: message.txt (consumed by telegram_send.py)
 """
 
-import os
-import json
-import time
-import math
+import os, json, time, math
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import Dict, Any, List
 
 import requests
+import pandas as pd
+import numpy as np
+
+try:
+    # technical indicators
+    from ta.momentum import RSIIndicator
+    from ta.trend import EMAIndicator, MACD
+except Exception:
+    # minimal fallback if "ta" would be missing
+    RSIIndicator = EMAIndicator = MACD = None
+
+# --------- Config ---------
+DEFAULT_COINS = [
+    {"symbol": "BTC", "binance": "BTCUSDT"},
+    {"symbol": "ETH", "binance": "ETHUSDT"},
+    {"symbol": "SOL", "binance": "SOLUSDT"},
+]
+INTERVAL = "15m"
+KLIMIT = 200                         # candles to fetch
+COOLDOWN_MIN = int(os.getenv("COOLDOWN_MINUTES", "60"))  # minutes between ALERTS per coin
+STATE_PATH = "signal_state.json"
+MSG_PATH = "message.txt"
+# thresholds
+ALERT_MOVE_15M = 2.0                 # % 15m move for Alert
+INFO_MOVE_15M = 0.5                  # % 15m move lower bound for Info
+RSI_HOT = 70
+RSI_COLD = 30
+# --------------------------
 
 
-# --------------------------- Konfiguration ---------------------------
-
-BASE = "USD"
-INTERVAL_MIN = int(os.getenv("COOLDOWN_MINUTES", "15"))
-
-# Mapping Symbol -> CoinGecko-ID (ggf. erweitern)
-SYMBOL_TO_ID = {
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "SOL": "solana",
-    "BNB": "binancecoin",
-    "XRP": "ripple",
-    "ADA": "cardano",
-    "DOGE": "dogecoin",
-    "AVAX": "avalanche-2",
-    "LINK": "chainlink",
-    "TON": "the-open-network",
-    "TRX": "tron",
-    "DOT": "polkadot",
-    "MATIC": "matic-network",
-    "LTC": "litecoin",
-}
-
-STATE_FILE = Path("signal_state.json")
-COINS_FILE = Path("coins.json")
-MESSAGE_FILE = Path("message.txt")
-
-COINGECKO_SIMPLE = (
-    "https://api.coingecko.com/api/v3/simple/price"
-    "?ids={ids}&vs_currencies={vs}&include_24hr_change=true"
-)
-
-# Schwellen (liberal anpassbar)
-ALERT_M15 = 1.0       # % in ~15 Minuten
-ALERT_24H = 5.0       # % in 24h
-SIGNAL_M15 = 0.3
-SIGNAL_24H = 2.0
-INFO_M15 = 0.1
-INFO_24H = 0.5
+def load_coins() -> List[Dict[str, str]]:
+    # allow overriding via coins.json
+    if os.path.exists("coins.json"):
+        with open("coins.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list) and data:
+            return data
+    return DEFAULT_COINS
 
 
-# --------------------------- Hilfsfunktionen ---------------------------
-
-def load_json(path: Path, default):
-    if not path.exists():
-        return default
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-
-def save_json(path: Path, obj):
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-    tmp.replace(path)
-
-
-def utc_now_iso():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def fmt_money(val):
-    # $110,915.00 mit Komma-Tausendern
-    return "${:,.2f}".format(val)
-
-
-def fmt_pct(val):
-    # +0.74%
-    sign = "+" if val >= 0 else ""
-    return f"{sign}{val:.2f}%"
-
-
-def minutes_since(ts):
-    return (time.time() - ts) / 60.0
-
-
-def normalize_state_coins(state):
-    """
-    state["coins"] kann Dict ODER Liste sein -> in Dict mit Symbol-Key transformieren.
-    """
-    coins = state.get("coins", {})
-    if isinstance(coins, list):
-        new_dict = {}
-        for item in coins:
-            if isinstance(item, dict):
-                sym = item.get("symbol")
-                if sym:
-                    new_dict[sym] = item
-        state["coins"] = new_dict
-    elif not isinstance(coins, dict):
-        state["coins"] = {}
-    return state
-
-
-def read_coins():
-    """
-    coins.json kann ["BTC","ETH"] ODER [{"symbol":"BTC","id":"bitcoin"}, ...] enthalten.
-    Liefert Liste von (SYMBOL, COINGECKO_ID).
-    """
-    raw = load_json(COINS_FILE, default=[])
-    symbols = []
-
-    if isinstance(raw, list):
-        for it in raw:
-            if isinstance(it, str):
-                sym = it.upper()
-                coingecko_id = SYMBOL_TO_ID.get(sym)
-                if coingecko_id:
-                    symbols.append((sym, coingecko_id))
-            elif isinstance(it, dict):
-                sym = str(it.get("symbol", "")).upper()
-                cid = it.get("id") or SYMBOL_TO_ID.get(sym)
-                if sym and cid:
-                    symbols.append((sym, cid))
-    else:
-        # falls jemand ein Dict liefert, versuch's schlau zu raten
-        for sym, cid in raw.items():
-            if sym and cid:
-                symbols.append((sym.upper(), str(cid)))
-
-    # Duplikate raus
-    seen = set()
-    uniq = []
-    for sym, cid in symbols:
-        if sym not in seen:
-            uniq.append((sym, cid))
-            seen.add(sym)
-
-    return uniq
-
-
-def fetch_prices(ids):
-    url = COINGECKO_SIMPLE.format(ids=",".join(ids), vs=BASE.lower())
-    r = requests.get(url, timeout=20)
+def binance_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    r = requests.get(url, params=params, timeout=20)
     r.raise_for_status()
-    data = r.json()
-    # Beispiel: {"bitcoin":{"usd":110915.0,"usd_24h_change":0.7421}, ...}
-    return data
-
-
-def classify(m15, d24):
-    """
-    Liefert (emoji, label)
-    """
-    abs15 = abs(m15)
-    abs24 = abs(d24)
-
-    if abs15 >= ALERT_M15 or abs24 >= ALERT_24H:
-        return ("🚀" if (m15 > 0 or d24 > 0) else "🔻", "Alert")
-    if abs15 >= SIGNAL_M15 or abs24 >= SIGNAL_24H:
-        return ("📈" if (m15 > 0 or d24 > 0) else "📉", "Signal")
-    if abs15 >= INFO_M15 or abs24 >= INFO_24H:
-        return ("ℹ️", "Info")
-    return ("🟡", "HOLD")
-
-
-# --------------------------- Hauptlogik ---------------------------
-
-def build_message():
-    state = load_json(STATE_FILE, default={"coins": {}, "last_run": None})
-    state = normalize_state_coins(state)
-    state.setdefault("last_run", None)
-
-    pairs = read_coins()
-    if not pairs:
-        raise RuntimeError("coins.json enthält keine gültigen Einträge.")
-
-    # Preise holen
-    ids = [cid for _, cid in pairs]
-    prices = fetch_prices(ids)
-
-    lines = []
-    now_iso = utc_now_iso()
-
-    header = [
-        "📊 Signal Snapshot — " + now_iso.split("+")[0] + " UTC",
-        f"Basis: {BASE} • Intervall: {INTERVAL_MIN} Min • Quelle: CoinGecko",
-        ""
+    raw = r.json()
+    cols = [
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "quote_asset_volume", "n_trades",
+        "taker_buy_base", "taker_buy_quote", "ignore"
     ]
-    lines.extend(header)
+    df = pd.DataFrame(raw, columns=cols)
+    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
-    had_movement = False
 
-    for sym, cid in pairs:
-        pdata = prices.get(cid, {})
-        price = float(pdata.get(BASE.lower(), 0.0))
-        ch24 = float(pdata.get(f"{BASE.lower()}_24h_change", 0.0))  # %
+def binance_24h_change(symbol: str) -> float:
+    url = "https://api.binance.com/api/v3/ticker/24hr"
+    r = requests.get(url, params={"symbol": symbol}, timeout=15)
+    r.raise_for_status()
+    j = r.json()
+    return float(j.get("priceChangePercent", 0.0))
 
-        coin_state = state["coins"].get(sym, {})
-        last_price = float(coin_state.get("last_price", 0.0))
-        last_ts = float(coin_state.get("last_ts", 0.0))
 
-        # 15m Δ: aus letztem gespeicherten Preis
-        if last_price > 0:
-            m15 = (price - last_price) / last_price * 100.0
-        else:
-            m15 = 0.0
+def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    if len(df) < 50:
+        return df.assign(
+            rsi=np.nan, ema50=np.nan, ema200=np.nan,
+            macd=np.nan, macd_signal=np.nan
+        )
+    close = df["close"]
+    rsi = RSIIndicator(close, window=14).rsi() if RSIIndicator else pd.Series(np.nan, index=df.index)
+    ema50 = EMAIndicator(close, window=50).ema_indicator() if EMAIndicator else pd.Series(np.nan, index=df.index)
+    ema200 = EMAIndicator(close, window=200).ema_indicator() if EMAIndicator else pd.Series(np.nan, index=df.index)
+    macd_obj = MACD(close) if MACD else None
+    macd = macd_obj.macd() if macd_obj else pd.Series(np.nan, index=df.index)
+    macd_signal = macd_obj.macd_signal() if macd_obj else pd.Series(np.nan, index=df.index)
+    out = df.copy()
+    out["rsi"] = rsi
+    out["ema50"] = ema50
+    out["ema200"] = ema200
+    out["macd"] = macd
+    out["macd_signal"] = macd_signal
+    return out
 
-        # "Frische" des 15m-Werts grob einordnen
-        age_min = minutes_since(last_ts) if last_ts > 0 else None
-        # wenn älter als 60 min, markiere 15m als ~0.00
-        if age_min is not None and age_min > 60:
-            m15 = 0.0
 
-        emoji, label = classify(m15, ch24)
-        if label in ("Alert", "Signal", "Info"):
-            had_movement = True
+def load_state() -> Dict[str, Any]:
+    if os.path.exists(STATE_PATH):
+        try:
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"coins": {}}
 
-        line = f"{emoji} {sym}: {fmt_money(price)} • 15m {fmt_pct(m15)} • 24h {fmt_pct(ch24)} — {label}"
-        lines.append(line)
 
-        # state aktualisieren
-        state["coins"][sym] = {
-            "symbol": sym,
-            "last_price": price,
-            "last_ts": time.time(),
-        }
+def save_state(state: Dict[str, Any]) -> None:
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
-    lines.append("")
-    if not had_movement:
-        lines.append("🟡 Keine nennenswerte Bewegung über den Info-Schwellen.")
 
-    lines.append("")
-    lines.append("Legende: 🟡 Hold • ℹ️ Info • 📈/📉 Signal • 🚀/🔻 Alert")
+def fmt_usd(x: float) -> str:
+    if x >= 1000:
+        return f"${x:,.2f}"
+    if x >= 1:
+        return f"${x:,.2f}"
+    return f"${x:.4f}"
 
-    message = "\n".join(lines)
 
-    # speichern
-    with MESSAGE_FILE.open("w", encoding="utf-8") as f:
-        f.write(message)
+def classify_signal(df: pd.DataFrame) -> Dict[str, Any]:
+    """Return dict with computed metrics and label/emoji."""
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else last
+    price = float(last["close"])
+    prev_price = float(prev["close"])
+    change_15m = (price / prev_price - 1.0) * 100.0 if prev_price else 0.0
+    rsi = float(last.get("rsi", np.nan))
+    ema200 = float(last.get("ema200", np.nan))
+    ema200_prev = float(prev.get("ema200", np.nan))
+    macd, macdsig = float(last.get("macd", np.nan)), float(last.get("macd_signal", np.nan))
+    macd_prev, macdsig_prev = float(prev.get("macd", np.nan)), float(prev.get("macd_signal", np.nan))
 
-    state["last_run"] = now_iso
-    save_json(STATE_FILE, state)
+    # Cross detection
+    macd_cross_up = (macd > macdsig) and (macd_prev <= macdsig_prev)
+    macd_cross_dn = (macd < macdsig) and (macd_prev >= macdsig_prev)
+    ema_cross_up = (price > ema200) and (prev_price <= ema200_prev)
+    ema_cross_dn = (price < ema200) and (prev_price >= ema200_prev)
 
-    return message, state
+    # Baseline label
+    label = "HOLD"
+    emoji = "🟡"
+
+    # Info zone
+    if abs(change_15m) >= INFO_MOVE_15M or (not math.isnan(rsi) and (rsi >= RSI_HOT or rsi <= RSI_COLD)):
+        label, emoji = "Info", "ℹ️"
+
+    # Alert conditions
+    alert = False
+    direction = None
+    if change_15m >= ALERT_MOVE_15M or macd_cross_up or ema_cross_up or (not math.isnan(rsi) and rsi >= 75):
+        alert, direction = True, "UP"
+    if change_15m <= -ALERT_MOVE_15M or macd_cross_dn or ema_cross_dn or (not math.isnan(rsi) and rsi <= 25):
+        alert, direction = True, "DOWN"
+
+    if alert:
+        label = "Alert"
+        emoji = "🚀" if direction == "UP" else "🔻"
+
+    trend_arrow = "📈" if change_15m >= 0 else "📉"
+    macd_dir = "↑" if macd >= macdsig else "↓"
+    ema200_dist = ((price / ema200) - 1.0) * 100.0 if not math.isnan(ema200) and ema200 else float("nan")
+
+    return {
+        "price": price,
+        "change_15m": change_15m,
+        "rsi": rsi,
+        "ema200_dist": ema200_dist,
+        "macd_dir": macd_dir,
+        "label": label,
+        "emoji": emoji,
+        "trend": trend_arrow,
+        "alert": alert,
+        "direction": direction,
+    }
+
+
+def allowed_alert(symbol: str, state: Dict[str, Any]) -> bool:
+    now = int(time.time())
+    last_ts = int(state.get("coins", {}).get(symbol, {}).get("last_alert_ts", 0))
+    return (now - last_ts) >= COOLDOWN_MIN * 60
+
+
+def remember_alert(symbol: str, state: Dict[str, Any]) -> None:
+    now = int(time.time())
+    state.setdefault("coins", {}).setdefault(symbol, {})["last_alert_ts"] = now
+
+
+def build_message() -> str:
+    coins = load_coins()
+    state = load_state()
+
+    header_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [f"📊 Signal Snapshot — {header_ts}", "Basis: USD • Intervall: 15 Min • Quelle: Binance", ""]
+
+    any_alert = False
+
+    for c in coins:
+        sym = c["symbol"].upper()
+        pair = c["binance"].upper()
+
+        # Fetch
+        df = binance_klines(pair, INTERVAL, KLIMIT)
+        df = compute_indicators(df)
+        metrics = classify_signal(df)
+        change_24h = binance_24h_change(pair)
+
+        price = metrics["price"]
+        change15 = metrics["change_15m"]
+        rsi = metrics["rsi"]
+        ema200d = metrics["ema200_dist"]
+        macd_dir = metrics["macd_dir"]
+        label = metrics["label"]
+        emoji = metrics["emoji"]
+        trend = metrics["trend"]
+
+        # Alert cooldown control
+        if metrics["alert"]:
+            if allowed_alert(sym, state):
+                any_alert = True
+                remember_alert(sym, state)
+            else:
+                # downgrade to Info if still on cooldown
+                label = "Info"
+                emoji = "ℹ️"
+
+        # First line (summary)
+        lines.append(
+            f"{emoji} {sym}: {fmt_usd(price)} • 15m {change15:+.2f}% • 24h {change_24h:+.2f}% — {label.upper()}"
+        )
+
+        # Second line (indicators)
+        rsi_txt = f"RSI {rsi:.0f}" if not math.isnan(rsi) else "RSI n/a"
+        ema_txt = f"EMA200 {ema200d:+.2f}%" if not math.isnan(ema200d) else "EMA200 n/a"
+        lines.append(f"{trend} {rsi_txt} • {ema_txt} • MACD {macd_dir}")
+        lines.append("")  # spacer
+
+    if not any_alert:
+        lines.append("🟡 Keine nennenswerte Bewegung über den Alert-Schwellen.")
+
+    save_state(state)
+    return "\n".join(lines).strip()
 
 
 def main():
-    try:
-        msg, _ = build_message()
-        print("✅ Nachricht erzeugt:")
-        print(msg)
-    except Exception as e:
-        # Für GitHub Actions gut lesbar ausgeben und Exit 1
-        print(f"ERROR: {e}")
-        raise
+    msg = build_message()
+    with open(MSG_PATH, "w", encoding="utf-8") as f:
+        f.write(msg)
+    print("Message generated and written to message.txt")
 
 
 if __name__ == "__main__":
