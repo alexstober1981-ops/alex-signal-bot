@@ -1,31 +1,47 @@
 name: Bot Poll (commands)
 
 on:
-  workflow_dispatch:  # manuell starten im Actions-Tab
+  workflow_dispatch: {}   # manuell starten
 
-permissions:
-  contents: write
+defaults:
+  run:
+    shell: bash
 
 jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.11"
 
-      - run: pip install requests
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Check Telegram secrets
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_TOKEN }}" ]; then
+            echo "Missing secret: TELEGRAM_TOKEN"; exit 1; fi
+          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "Missing secret: TELEGRAM_CHAT_ID"; exit 1; fi
+          echo "Secrets OK."
 
       - name: Run bot_poll once
-        run: python bot_poll.py
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot_poll.py
 
-      - name: Persist last_update_id
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "bot_poll: persist last_update_id"
-          file_pattern: last_update_id.txt
+      - name: Persist last_update_id (optional)
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          [ -f last_update_id ] && git add last_update_id || true
+          git diff --cached --quiet || { git commit -m "chore(poll): update last_update_id"; git push; }
