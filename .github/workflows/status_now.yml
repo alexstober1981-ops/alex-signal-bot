@@ -1,3 +1,4 @@
+# .github/workflows/status_now.yml
 name: Status now
 
 on:
@@ -7,42 +8,22 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
-        run: |
-          python -V
-          pip install --upgrade pip
-          pip install --upgrade requests
-
-      - name: Debug repo layout
-        run: |
-          pwd
-          ls -la
-          echo "----- show working files above -----"
+        run: pip install --upgrade requests
 
       - name: Generate
         env:
           COOLDOWN_MINUTES: "0"
-        run: |
-          set -euxo pipefail
-          python -u generate_message.py
-
-      - name: Show generated files
-        run: |
-          echo "message.txt exists?"; [ -f message.txt ] && tail -n +1 -v message.txt || echo "NO message.txt"
-          echo "signal_state.json exists?"; [ -f signal_state.json ] && tail -n +1 -v signal_state.json || echo "NO signal_state.json"
+        run: python -u generate_message.py
 
       - name: Send
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          set -euxo pipefail
-          python -u telegram_send.py
+          TELEGRAM_TOKEN:  ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -u telegram_send.py
