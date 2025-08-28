@@ -3,18 +3,156 @@
     "symbol": "BTC",
     "binance": "BTCUSDT",
     "thresholds": {
-      "move":  { "5m": 0.8, "15m": 1.8, "1h": 2.5, "4h": 3.5, "1d": 5.0 },
-      "info":  { "5m": 0.2, "15m": 0.5, "1h": 1.0, "4h": 1.5, "1d": 2.0 },
-      "rsi_hot": 72,
-      "rsi_cold": 28
+      "move": { "5m": 0.6, "15m": 1.2, "24h": 3.8 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 70, "oversold": 30 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
     }
   },
-  { "symbol": "ETH", "binance": "ETHUSDT" },
+  {
+    "symbol": "ETH",
+    "binance": "ETHUSDT",
+    "thresholds": {
+      "move": { "5m": 0.7, "15m": 1.3, "24h": 4.2 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 70, "oversold": 30 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
   {
     "symbol": "SOL",
     "binance": "SOLUSDT",
     "thresholds": {
-      "move": { "5m": 1.2, "15m": 2.2, "1h": 3.2, "4h": 4.0, "1d": 6.0 }
+      "move": { "5m": 1.2, "15m": 2.2, "24h": 7.5 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "HBAR",
+    "binance": "HBARUSDT",
+    "thresholds": {
+      "move": { "5m": 1.0, "15m": 2.0, "24h": 6.0 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "XRP",
+    "binance": "XRPUSDT",
+    "thresholds": {
+      "move": { "5m": 0.9, "15m": 1.8, "24h": 5.5 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "SEI",
+    "binance": "SEIUSDT",
+    "thresholds": {
+      "move": { "5m": 1.1, "15m": 2.1, "24h": 6.8 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "KAS",
+    "binance": "KASUSDT",
+    "thresholds": {
+      "move": { "5m": 1.5, "15m": 2.8, "24h": 9.0 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 73, "oversold": 27 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "RNDR",
+    "binance": "RNDRUSDT",
+    "thresholds": {
+      "move": { "5m": 1.2, "15m": 2.2, "24h": 7.2 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "FET",
+    "binance": "FETUSDT",
+    "thresholds": {
+      "move": { "5m": 1.1, "15m": 2.0, "24h": 6.5 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "SUI",
+    "binance": "SUIUSDT",
+    "thresholds": {
+      "move": { "5m": 1.0, "15m": 1.9, "24h": 6.2 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "AVAX",
+    "binance": "AVAXUSDT",
+    "thresholds": {
+      "move": { "5m": 1.0, "15m": 2.0, "24h": 6.8 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "ADA",
+    "binance": "ADAUSDT",
+    "thresholds": {
+      "move": { "5m": 0.9, "15m": 1.7, "24h": 5.2 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
+    }
+  },
+  {
+    "symbol": "DOT",
+    "binance": "DOTUSDT",
+    "thresholds": {
+      "move": { "5m": 0.9, "15m": 1.8, "24h": 5.6 }
+    },
+    "indicators": {
+      "rsi": { "period": 14, "overbought": 72, "oversold": 28 },
+      "ema200": { "use": true, "direction_change_alert": true },
+      "macd": { "fast": 12, "slow": 26, "signal": 9, "cross_alert": true }
     }
   }
 ]
