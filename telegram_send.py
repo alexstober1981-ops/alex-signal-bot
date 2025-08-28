@@ -1,41 +1,35 @@
-# telegram_send.py
-# Sendet message.txt via Telegram Bot API.
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-import os, sys, json, pathlib, urllib.parse
-import requests
+import os, sys, json, requests
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-CHAT  = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")  # fallback
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-MSG_PATH = pathlib.Path("message.txt")
-
-def fail(msg: str):
-    print(f"❌ {msg}", file=sys.stderr)
+if not TOKEN:
+    print("❌ TELEGRAM_TOKEN fehlt!", file=sys.stderr)
+    sys.exit(1)
+if not CHAT_ID:
+    print("❌ TELEGRAM_CHAT_ID fehlt!", file=sys.stderr)
     sys.exit(1)
 
-def main():
-    if not TOKEN:
-        fail("TELEGRAM_BOT_TOKEN fehlt!")
-    if not CHAT:
-        fail("TELEGRAM_CHAT_ID fehlt!")
-    if not MSG_PATH.exists():
-        fail("message.txt wurde nicht gefunden – erst generate_message.py ausführen.")
+if not os.path.exists("message.txt"):
+    print("❌ message.txt nicht gefunden (generate_message.py nicht gelaufen?).", file=sys.stderr)
+    sys.exit(1)
 
-    text = MSG_PATH.read_text(encoding="utf-8")
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT,
-        "text": text,
-        "parse_mode": "HTML",   # (wir senden plain text, HTML ist robust)
-        "disable_web_page_preview": True,
-    }
-    r = requests.post(url, json=payload, timeout=20)
-    r.raise_for_status()
-    resp = r.json()
-    if not resp.get("ok"):
-        fail(f"Telegram Fehler: {json.dumps(resp)}")
+with open("message.txt", "r", encoding="utf-8") as f:
+    text = f.read().strip()
 
-    print("✅ Nachricht an Telegram gesendet.")
+url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+payload = {
+    "chat_id": CHAT_ID,
+    "text": text,
+    "disable_web_page_preview": True,
+    "parse_mode": "HTML"  # plain text safe; HTML tolerates emojis
+}
+r = requests.post(url, json=payload, timeout=20)
+if r.status_code != 200:
+    print(f"❌ Telegram API Error {r.status_code}: {r.text}", file=sys.stderr)
+    sys.exit(1)
 
-if __name__ == "__main__":
-    main()
+print("✅ Nachricht an Telegram gesendet.")
