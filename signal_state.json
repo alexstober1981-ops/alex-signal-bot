@@ -151,5 +151,38 @@
       "last_status": "HOLD"
     }
   },
-  "last_run": 1756499592
+  "last_run": 1756499592,
+  "BTC": {
+    "prev_rsi": 51.50567635174133
+  },
+  "ETH": {
+    "prev_rsi": 41.764116271299294
+  },
+  "SOL": {
+    "prev_rsi": 54.03225806451702
+  },
+  "AVAX": {
+    "prev_rsi": 0.0
+  },
+  "RNDR": {
+    "prev_rsi": 100.0
+  },
+  "FET": {
+    "prev_rsi": 100.0
+  },
+  "SUI": {
+    "prev_rsi": 100.0
+  },
+  "ADA": {
+    "prev_rsi": 100.0
+  },
+  "DOT": {
+    "prev_rsi": 100.0
+  },
+  "HBAR": {
+    "prev_rsi": 63.529411764706516
+  },
+  "XRP": {
+    "prev_rsi": 35.664335664335894
+  }
 }
