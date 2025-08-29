@@ -1,71 +1,18 @@
 [
-  { "symbol": "BTC",
-    "buy_rsi": 65, "sell_rsi": 30,
-    "min_15m_up": 0.45, "min_15m_down": -0.45,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "ETH",
-    "buy_rsi": 65, "sell_rsi": 30,
-    "min_15m_up": 0.45, "min_15m_down": -0.45,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
+  { "symbol": "BTC" },
+  { "symbol": "ETH" },
 
-  { "symbol": "SOL",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "AVAX",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "RNDR",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "FET",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "SUI",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "ADA",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "DOT",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "HBAR",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "XRP",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
+  { "symbol": "SOL", "buy_rsi_cross_up": 32, "sell_rsi_cross_down": 68, "min_5m": 0.15 },
+  { "symbol": "AVAX" },
+  { "symbol": "RNDR" },
+  { "symbol": "FET" },
+  { "symbol": "SUI" },
+  { "symbol": "ADA" },
+  { "symbol": "DOT" },
+  { "symbol": "HBAR" },
+  { "symbol": "XRP" },
 
-  { "symbol": "SEI",
-    "force_exchange": "bybit",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.20, "cooldown_min": 30
-  },
-  { "symbol": "KAS",
-    "force_exchange": "bybit",
-    "buy_rsi": 62, "sell_rsi": 35,
-    "min_15m_up": 0.40, "min_15m_down": -0.40,
-    "min_atr_pct": 0.25, "cooldown_min": 30
-  }
+  // SEI & KAS -> bevorzugt Derivate/OKX. Fallbacks sind enthalten.
+  { "symbol": "SEI", "source_pref": ["bybit_linear","okx","bybit_spot","binanceus"] },
+  { "symbol": "KAS", "source_pref": ["bybit_linear","okx","bybit_spot","binanceus"] }
 ]
