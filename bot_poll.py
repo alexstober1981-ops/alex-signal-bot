@@ -65,8 +65,6 @@ def tg_delete_webhook() -> None:
     url = _bot_url("deleteWebhook")
     try:
         r = requests.get(url, timeout=HTTP_TIMEOUT)
-        # 200 mit ok:true erwartet – aber wir ignorieren bewusst Fehler,
-        # weil der Webhook evtl. nie gesetzt war.
         print(f"[INFO] deleteWebhook status={r.status_code} body={r.text[:200]}")
     except Exception as e:
         print(f"[WARN] deleteWebhook: {e}")
@@ -76,7 +74,7 @@ def tg_get_updates(offset: Optional[int]) -> List[Dict[str, Any]]:
     """Long-Poll getUpdates mit Retry und 409-Heilung."""
     params = {
         "timeout": POLLING_TIMEOUT,
-        "allowed_updates": json.dumps(["message"])  # wir brauchen nur Nachrichten
+        "allowed_updates": json.dumps(["message"])
     }
     if offset is not None:
         params["offset"] = offset
@@ -86,7 +84,6 @@ def tg_get_updates(offset: Optional[int]) -> List[Dict[str, Any]]:
         try:
             r = requests.get(_bot_url("getUpdates"), params=params, timeout=HTTP_TIMEOUT + POLLING_TIMEOUT)
             if r.status_code == 409:
-                # Sicher ist sicher – Webhook löschen und 1x retryen
                 print("[WARN] 409 Conflict bei getUpdates – lösche Webhook & retry…")
                 tg_delete_webhook()
                 time.sleep(1)
@@ -100,7 +97,6 @@ def tg_get_updates(offset: Optional[int]) -> List[Dict[str, Any]]:
             last_err = e
             print(f"[WARN] getUpdates attempt {attempt}/{MAX_RETRIES} failed: {e}")
             time.sleep(SLEEP_BETWEEN_RETRIES)
-    # alle Versuche scheiterten
     raise RuntimeError(f"getUpdates failed: {last_err}")
 
 
@@ -121,7 +117,6 @@ def tg_send_message(chat_id: str, text: str, disable_web_page_preview: bool = Tr
 
 # ---------- Business-Logik ----------
 def handle_message(msg: Dict[str, Any]) -> None:
-    """Ganz schlanke Command-Handler – erweiterbar nach Bedarf."""
     if "text" not in msg:
         return
     text: str = msg["text"].strip()
@@ -135,18 +130,15 @@ def handle_message(msg: Dict[str, Any]) -> None:
     elif text.lower() in ("/help", "help"):
         tg_send_message(CHAT_ID, "ℹ️ Verfügbar: /start, /ping, /help")
     else:
-        # hier könntest du weitere Kommandos anbinden
         print(f"[INFO] Unbekanntes Text-Event: {text!r}")
 
 
 def process_updates(updates: List[Dict[str, Any]], last_update_id: Optional[int]) -> Optional[int]:
-    """Events der Reihe nach verarbeiten und den neuesten update_id zurückgeben."""
     newest = last_update_id
     for upd in updates:
         uid = upd.get("update_id")
         if uid is None:
             continue
-        # Telegram-Events: uns interessieren nur Messages
         msg = upd.get("message")
         if msg:
             handle_message(msg)
@@ -156,7 +148,6 @@ def process_updates(updates: List[Dict[str, Any]], last_update_id: Optional[int]
 
 def main_once() -> None:
     print(f"[INFO] Starte Polling – offset={_load_last_update_id()}")
-    # Idempotent: erst Webhook entfernen
     tg_delete_webhook()
 
     offset = _load_last_update_id()
@@ -166,7 +157,6 @@ def main_once() -> None:
         return
 
     newest = process_updates(updates, offset)
-    # Beim nächsten Poll wollen wir NACH dem letzten Event starten
     if newest is not None:
         _save_last_update_id(newest + 1)
         print(f"[INFO] last_update_id gespeichert: {newest + 1}")
