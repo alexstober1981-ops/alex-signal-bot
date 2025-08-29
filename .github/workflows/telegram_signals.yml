@@ -1,48 +1,85 @@
 name: Telegram Signals
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"   # alle 15 Minuten (UTC)
-  workflow_dispatch:
-
-permissions:
-  contents: write
+  workflow_dispatch: {}
+  # Optional (UTC!): Entkommentieren und anpassen, wenn du feste Zeiten willst
+  # schedule:
+  #   - cron: "00 03 * * *"   # 05:00 Berlin (im Winter UTC+1/2 beachten)
+  #   - cron: "00 08 * * *"   # 10:00
+  #   - cron: "30 12 * * *"   # 14:30
+  #   - cron: "00 16 * * *"   # 18:00
+  #   - cron: "00 20 * * *"   # 22:00
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: write  # damit push/commit erlaubt ist
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install --upgrade requests pandas numpy ta
+          python -m pip install --upgrade pip
+          pip install requests pandas numpy python-dateutil pytz ta
 
       - name: Generate
         env:
-          COOLDOWN_MINUTES: "60"
-        run: python -u generate_message.py
+          COOLDOWN_MINUTES: "0"
+        run: |
+          set -euxo pipefail
+          python -u generate_message.py
+
+      # Falls dein Code (noch) keine CSV schreibt, legen wir eine mit Header an,
+      # damit der Commit-Step nie abbricht.
+      - name: Ensure log file exists
+        run: |
+          if [ ! -f signals_log.csv ]; then
+            echo "ts,symbol,action,reason" > signals_log.csv
+          fi
 
       - name: Commit state/log (if changed)
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [[ -n "$(git status --porcelain -- signal_state.json signals_log.csv)" ]]; then
-            git add signal_state.json signals_log.csv
-            git commit -m "state/log: update $(date -u +'%Y-%m-%d %H:%M UTC')"
-            git push
+          set -euxo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          CHANGED=0
+          for f in signal_state.json signals_log.csv message.txt alerts.txt; do
+            if [ -f "$f" ]; then
+              git add "$f" || true
+              CHANGED=1
+            fi
+          done
+
+          if [ "$CHANGED" -eq 1 ]; then
+            git commit -m "Update generated artifacts [skip ci]" || echo "No changes to commit"
+            git push || true
           else
-            echo "No state/log change."
+            echo "No files to commit"
           fi
 
       - name: Send to Telegram (main + alerts)
         env:
-          TELEGRAM_TOKEN:        ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID:      ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}  # optional
-        run: python -u telegram_send.py
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euxo pipefail
+          # Secrets prüfen – wenn fehlt, sauber überspringen
+          if [ -z "${TELEGRAM_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+            echo "Missing TELEGRAM secrets, skipping send step."
+            exit 0
+          fi
+          # Optional: nur senden, wenn message.txt existiert
+          if [ -f message.txt ]; then
+            python -u telegram_send.py
+          else
+            echo "message.txt not found, skip sending."
+          fi
