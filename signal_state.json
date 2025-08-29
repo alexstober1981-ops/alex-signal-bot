@@ -3,18 +3,21 @@
   "coins": {
     "BTC": {
       "symbol": "BTC",
-      "last_price": 112480.0,
-      "last_ts": 1756402347.0324717
+      "last_price": 108096.53,
+      "last_ts": 1756402347.0324717,
+      "last_status": "HOLD"
     },
     "ETH": {
       "symbol": "ETH",
-      "last_price": 4482.23,
-      "last_ts": 1756402347.0324802
+      "last_price": 4309.15,
+      "last_ts": 1756402347.0324802,
+      "last_status": "HOLD"
     },
     "SOL": {
       "symbol": "SOL",
-      "last_price": 209.78,
-      "last_ts": 1756402347.0324862
+      "last_price": 202.51,
+      "last_ts": 1756402347.0324862,
+      "last_status": "HOLD"
     },
     "KAS": {
       "symbol": "KAS",
@@ -60,7 +63,10 @@
         "tp1": null,
         "tp2": null,
         "sl": null
-      }
+      },
+      "last_price": 4.818,
+      "last_ts": 0,
+      "last_status": "HOLD"
     },
     "FET": {
       "symbol": "FET",
@@ -83,7 +89,10 @@
         "tp1": null,
         "tp2": null,
         "sl": null
-      }
+      },
+      "last_price": 0.611,
+      "last_ts": 0,
+      "last_status": "HOLD"
     },
     "SUI": {
       "symbol": "SUI",
@@ -106,12 +115,36 @@
         "tp1": null,
         "tp2": null,
         "sl": null
-      }
+      },
+      "last_price": 3.2153,
+      "last_ts": 0,
+      "last_status": "HOLD"
     },
     "AVAX": {
       "symbol": "AVAX",
-      "last_price": 24.46,
-      "last_ts": 1756402347.0324917
+      "last_price": 23.25,
+      "last_ts": 1756402347.0324917,
+      "last_status": "HOLD"
+    },
+    "HBAR": {
+      "last_price": 0.22495,
+      "last_ts": 0,
+      "last_status": "HOLD"
+    },
+    "XRP": {
+      "last_price": 2.8057,
+      "last_ts": 0,
+      "last_status": "HOLD"
+    },
+    "ADA": {
+      "last_price": 0.813,
+      "last_ts": 0,
+      "last_status": "HOLD"
+    },
+    "DOT": {
+      "last_price": 3.725,
+      "last_ts": 0,
+      "last_status": "HOLD"
     }
   },
   "last_run": "2025-08-28T17:32:27+00:00"
