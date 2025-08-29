@@ -4,340 +4,356 @@
 """
 generate_message.py
 Robuste Signal-Generierung mit Daten-Fallback:
-binance.us  →  Bybit (Spot)  →  OKX
+BinanceUS  →  Bybit (Spot)  →  OKX
 
-Outputs:
-- message.txt     : Markt-Snapshot (alle Coins)
-- alerts.txt      : nur starke Signale
-- signal_state.json : interner Zustand (Cooldown usw.)
-
-Konfiguration:
-- coins.json  : Liste der Coins; optionale per-Coin Schwellen (min_rsi, min_change)
-- ENV:
-  * COOLDOWN_MINUTES (Standard 30)
-  * BASE_QUOTE (Standard "USDT") – nur kosmetisch im Text
+- Liest Coins aus coins.json (Liste von {"symbol": "BTC", ...}).
+- Berechnet 5m/15m-Change, RSI(14), ATR%(14).
+- Schreibt message.txt (Snapshot) und alerts.txt (nur starke Signale).
+- Merkt sich zuletzt gesendete Alerts in signal_state.json (Cooldown).
 """
 
 from __future__ import annotations
-import json, os, time, math
+import json, os, time, math, statistics
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Optional
-
+from typing import List, Dict, Any, Optional, Tuple
 import requests
 
-# ========= Konfig & Defaults =========
+# ----------------------------
+# Einstellungen / Defaults
+# ----------------------------
+BASE = "USD"
+INTERVALS = ("5m", "15m")
+COOLDOWN_MIN = 30                     # Cooldown je Coin (Minuten)
+STATE_PATH = "signal_state.json"
+MSG_PATH = "message.txt"
+ALERTS_PATH = "alerts.txt"
+LOG_PATH = "signals_log.csv"          # optional, wird nur benutzt falls vorhanden
 
+# Standard-Schwellen (können pro Coin via coins.json überschrieben werden)
 DEFAULTS = {
-    "min_rsi":    50,     # Mindestrsi für ein Signal
-    "min_change": 0.003,  # 0.3% (als Dezimalzahl)
+    "min_rsi": 50,                    # ab welchem RSI überhaupt interessant
+    "min_change_5m": 0.25,            # % absolute Veränderung 5m
+    "min_change_15m": 0.40,           # % absolute Veränderung 15m
+    "min_atr_pct": 0.20,              # % ATR (Volatilität) mind.
 }
 
-COOLDOWN_MIN = int(os.getenv("COOLDOWN_MINUTES", "30"))
-BASE_QUOTE = os.getenv("BASE_QUOTE", "USDT")
+# User Agent
+_HEADERS = {"User-Agent": "Mozilla/5.0 (signals-bot)"}
 
-MSG_PATH     = "message.txt"
-ALERTS_PATH  = "alerts.txt"
-STATE_PATH   = "signal_state.json"
-COINS_PATH   = "coins.json"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (SignalBot; +https://github.com)",
-    "Accept": "application/json",
+# ----------------------------
+# Exchange-spezifische Symbol-Mappings
+# base_pair ist unser internes Schema: z. B. "SEIUSDT", "KASUSDT"
+# ----------------------------
+EX_SYMBOLS = {
+    "binanceus": {
+        "SEIUSDT": "SEIUSDT",
+        "KASUSDT": None,            # KAS ist nicht auf BinanceUS -> None = überspringen
+    },
+    "bybit": {
+        "SEIUSDT": "SEIUSDT",
+        "KASUSDT": "KASUSDT",
+    },
+    "okx": {
+        "SEIUSDT": "SEI-USDT",      # OKX nutzt Bindestriche
+        "KASUSDT": "KAS-USDT",
+    },
 }
 
-# ========= Utils =========
+# Bybit Intervall-Map
+_BYBIT_INTERVAL = {"1m": "1", "3m": "3", "5m": "5", "15m": "15"}
+# OKX Intervall-Map
+_OKX_INTERVAL = {"1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m"}
 
-def load_state() -> Dict:
-    if os.path.exists(STATE_PATH):
-        try:
-            with open(STATE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"coins": {}, "last_run": 0}
-
-def save_state(state: Dict) -> None:
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
-def load_coins() -> List[Dict]:
-    # Fallback-Liste, falls keine coins.json vorhanden ist
-    default_coins = [
-        {"symbol": "BTC"},
-        {"symbol": "ETH"},
-        {"symbol": "SOL"},  # in coins.json ggf. schärfer
-        {"symbol": "HBAR"},
-        {"symbol": "XRP"},
-        {"symbol": "SEI"},
-        {"symbol": "KAS"},  # in coins.json ggf. schärfer
-        {"symbol": "RNDR"},
-        {"symbol": "FET"},
-        {"symbol": "SUI"},
-        {"symbol": "AVAX"},
-        {"symbol": "ADA"},
-        {"symbol": "DOT"},
-    ]
-    if not os.path.exists(COINS_PATH):
-        return default_coins
+# ----------------------------
+# Utilities
+# ----------------------------
+def load_json(path: str, default):
     try:
-        with open(COINS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # sanity: nur Dicts mit "symbol"
-            out = []
-            for c in data:
-                if isinstance(c, dict) and "symbol" in c:
-                    out.append(c)
-            return out or default_coins
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
-        return default_coins
+        return default
 
-def fmt_price(p: float) -> str:
-    if p >= 1000:
-        return f"${p:,.2f}"
-    if p >= 1:
-        return f"${p:,.2f}"
-    return f"${p:.4f}"
+def save_json(path: str, data: Any):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def pct(a: float) -> str:
-    s = f"{a*100:+.2f}%"
-    return s
+def write_text(path: str, txt: str):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(txt)
 
-def now_utc_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-# ========= Daten-Fetch (Fallback: BinanceUS -> Bybit -> OKX) =========
-
-def _okx_symbol(pair: str) -> str:
-    # BTCUSDT -> BTC-USDT
-    if pair.endswith("USDT"):
-        return pair[:-4] + "-USDT"
-    return pair.replace("USDT", "-USDT")
-
-def fetch_klines(pair: str, interval: str) -> Optional[List[Tuple[int,float,float,float,float]]]:
-    """
-    Liefert Liste von Kerzen: [(t_ms, open, high, low, close), ...]
-    oder None bei Fehler.
-    interval: '5m' oder '15m'
-    """
-
-    # --- 1) Binance.US ---
+def append_csv_row(ts: str, sym: str, price: float, ch5: float, ch15: float, atrp: float, rsi: float):
+    if not LOG_PATH:
+        return
     try:
-        url = f"https://api.binance.us/api/v3/klines?symbol={pair}&interval={interval}&limit=300"
-        r = requests.get(url, headers=HEADERS, timeout=10)
-        if r.status_code == 451:
-            raise RuntimeError("451 from BinanceUS")
-        r.raise_for_status()
-        data = r.json()
-        res = []
-        for c in data:
-            res.append((int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4])))
-        if res:
-            return res
+        header_needed = not os.path.exists(LOG_PATH)
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            if header_needed:
+                f.write("ts,symbol,price,chg5,chg15,atrpct,rsi\n")
+            f.write(f"{ts},{sym},{price:.8f},{ch5:.4f},{ch15:.4f},{atrp:.4f},{rsi:.2f}\n")
     except Exception:
         pass
 
-    # --- 2) Bybit (Spot) ---
-    try:
-        iv = "5" if interval == "5m" else "15"
-        url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={pair}&interval={iv}&limit=300"
-        r = requests.get(url, headers=HEADERS, timeout=10)
-        r.raise_for_status()
-        j = r.json()
-        rows = j.get("result", {}).get("list", [])
-        # Bybit liefert jüngste zuletzt oder zuerst je nach API; wir sortieren sicherheitshalber
-        rows = sorted(rows, key=lambda x: int(x[0]))
-        res = []
-        for c in rows:
-            # [start, open, high, low, close, volume, turnover]
-            res.append((int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4])))
-        if res:
-            return res
-    except Exception:
-        pass
+def fmt_price(v: float) -> str:
+    # rudimentär: je nach Größe
+    if v >= 1000: return f"${v:,.2f}"
+    if v >= 1:    return f"${v:,.2f}"
+    return f"${v:.4f}"
 
-    # --- 3) OKX ---
-    try:
-        inst = _okx_symbol(pair)
-        bar = "5m" if interval == "5m" else "15m"
-        url = f"https://www.okx.com/api/v5/market/candles?instId={inst}&bar={bar}&limit=300"
-        r = requests.get(url, headers=HEADERS, timeout=10)
-        r.raise_for_status()
-        j = r.json()
-        rows = j.get("data", [])
-        # OKX liefert neueste zuerst -> umdrehen
-        rows = list(reversed(rows))
-        res = []
-        for c in rows:
-            # [ts, o, h, l, c, ...]
-            res.append((int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4])))
-        if res:
-            return res
-    except Exception:
-        pass
+def now_utc_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    return None
-
-# ========= Indikatoren =========
-
-def rsi(closes: List[float], period: int = 14) -> float:
-    if len(closes) <= period:
-        return 50.0
-    gains, losses = 0.0, 0.0
-    for i in range(1, period+1):
-        diff = closes[i] - closes[i-1]
+# ----------------------------
+# Indikatoren
+# ----------------------------
+def rsi(values: List[float], period: int = 14) -> float:
+    if len(values) < period + 1:
+        return float("nan")
+    gains, losses = [], []
+    for i in range(1, period + 1):
+        diff = values[-i] - values[-i-1]
         if diff >= 0:
-            gains += diff
+            gains.append(diff)
         else:
-            losses -= diff
-    avg_gain = gains / period
-    avg_loss = losses / period
-
-    for i in range(period+1, len(closes)):
-        diff = closes[i] - closes[i-1]
-        gain = max(diff, 0.0)
-        loss = max(-diff, 0.0)
-        avg_gain = (avg_gain*(period-1) + gain) / period
-        avg_loss = (avg_loss*(period-1) + loss) / period
-
+            losses.append(-diff)
+    avg_gain = (sum(gains) / period) if gains else 0.0
+    avg_loss = (sum(losses) / period) if losses else 0.0
     if avg_loss == 0:
-        return 70.0
+        return 100.0
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
-def atr_percent(ohlc: List[Tuple[int,float,float,float,float]], period: int = 14) -> float:
-    # True Range basiert auf High, Low, Close(prev)
-    if len(ohlc) <= period + 1:
-        return 0.0
+def atr_pct(ohlc: List[Tuple[float,float,float,float]], period: int = 14) -> float:
+    # ohlc: [(o,h,l,c), ...] -> ATR/close in %
+    if len(ohlc) < period + 1:
+        return float("nan")
     trs = []
-    prev_close = ohlc[0][4]
-    for i in range(1, len(ohlc)):
-        _, o, h, l, c = ohlc[i]
-        tr = max(h - l, abs(h - prev_close), abs(l - prev_close))
+    prev_close = ohlc[-period-1][3]
+    for i in range(-period, 0):
+        o, h, l, c = ohlc[i]
+        tr = max(h-l, abs(h - prev_close), abs(l - prev_close))
         trs.append(tr)
         prev_close = c
-    # Wilder-Smoothing
-    trn = trs[:period]
-    if len(trn) < period:
-        return 0.0
-    atr = sum(trn) / period
-    for x in trs[period:]:
-        atr = (atr*(period-1) + x) / period
-    last_close = ohlc[-1][4]
+    atr = sum(trs) / period
+    last_close = ohlc[-1][3]
     if last_close == 0:
-        return 0.0
+        return float("nan")
     return (atr / last_close) * 100.0
 
-# ========= Analyse einer Coin =========
+def pct_change(a: float, b: float) -> float:
+    if b == 0: return 0.0
+    return (a - b) / b * 100.0
 
-def analyze_coin(sym: str, per_coin: Dict, state: Dict) -> Tuple[str, Optional[str]]:
-    pair = f"{sym}USDT"
-    linestr = ""
-    alert_line: Optional[str] = None
+# ----------------------------
+# Daten-Fetch inkl. Fallback
+# ----------------------------
+def map_symbol(exchange: str, base_pair: str) -> Optional[str]:
+    # Versuch über EX_SYMBOLS
+    ex = exchange.lower()
+    if ex in EX_SYMBOLS and base_pair in EX_SYMBOLS[ex]:
+        return EX_SYMBOLS[ex][base_pair]
+    # generischer Fallback
+    if ex == "okx":
+        return base_pair.replace("USDT", "-USDT")
+    return base_pair
 
-    # 5m/15m Daten
-    data_5m = fetch_klines(pair, "5m")
-    data_15m = fetch_klines(pair, "15m")
+def fetch_binanceus(pair: str, interval: str, limit: int = 300):
+    url = f"https://api.binance.us/api/v3/klines?symbol={pair}&interval={interval}&limit={limit}"
+    r = requests.get(url, headers=_HEADERS, timeout=15)
+    if r.status_code == 451:
+        raise RuntimeError("451 (BinanceUS Blockiert)")
+    r.raise_for_status()
+    raw = r.json()
+    # [open_time, open, high, low, close, ...]
+    out = []
+    for c in raw:
+        out.append((float(c[1]), float(c[2]), float(c[3]), float(c[4])))
+    return out
 
-    if not data_5m or not data_15m:
-        linestr = f"🟡 {sym}: Datenfehler — HOLD"
-        return linestr, None
+def fetch_bybit(pair: str, interval: str, limit: int = 200):
+    iv = _BYBIT_INTERVAL.get(interval, "5")
+    url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={pair}&interval={iv}&limit={limit}"
+    r = requests.get(url, headers=_HEADERS, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+    if data.get("retCode") != 0:
+        raise RuntimeError(f"Bybit retCode {data.get('retCode')}")
+    # result->list: [ [start,open,high,low,close,volume,turnover], ... ] neueste zuerst
+    ls = data["result"]["list"]
+    ls.sort(key=lambda x: int(x[0]))
+    out = []
+    for c in ls:
+        out.append((float(c[1]), float(c[2]), float(c[3]), float(c[4])))
+    return out
 
-    # Preise/Indikatoren
-    close_5 = [c[4] for c in data_5m]
-    close_15 = [c[4] for c in data_15m]
-    price = close_5[-1]
-    ch5  = (close_5[-1] / close_5[-2]) - 1.0 if len(close_5) >= 2 else 0.0
-    # 15m ≈ 3×5m -> Diff von -4 nach -1
-    ch15 = (close_5[-1] / close_5[-4]) - 1.0 if len(close_5) >= 4 else 0.0
+def fetch_okx(pair: str, interval: str, limit: int = 200):
+    iv = _OKX_INTERVAL.get(interval, "5m")
+    url = f"https://www.okx.com/api/v5/market/candles?instId={pair}&bar={iv}&limit={limit}"
+    r = requests.get(url, headers=_HEADERS, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+    if data.get("code") != "0":
+        raise RuntimeError(f"OKX code {data.get('code')}")
+    # data -> list: [ [ts,open,high,low,close,vol,volCcy,volCcyQuote,confirm] ] neueste zuerst
+    ls = data["data"]
+    ls.sort(key=lambda x: int(x[0]))
+    out = []
+    for c in ls:
+        out.append((float(c[1]), float(c[2]), float(c[3]), float(c[4])))
+    return out
 
-    r = rsi(close_5, 14)
-    atrp = atr_percent(data_5m, 14)
+def fetch_klines(base_pair: str, interval: str) -> List[Tuple[float,float,float,float]]:
+    last_err = None
+    # 1) BinanceUS
+    try:
+        sym = map_symbol("binanceus", base_pair)
+        if sym:
+            return fetch_binanceus(sym, interval)
+    except Exception as e:
+        last_err = e
+    # 2) Bybit
+    try:
+        sym = map_symbol("bybit", base_pair)
+        if sym:
+            return fetch_bybit(sym, interval)
+    except Exception as e:
+        last_err = e
+    # 3) OKX
+    try:
+        sym = map_symbol("okx", base_pair)
+        if sym:
+            return fetch_okx(sym, interval)
+    except Exception as e:
+        last_err = e
+    raise RuntimeError(f"Klines-Fetch fehlgeschlagen: {last_err}")
+
+# ----------------------------
+# Analyse
+# ----------------------------
+def analyze_symbol(symbol: str, th: Dict[str, Any]) -> Dict[str, Any]:
+    pair = symbol + "USDT"
+    try:
+        d5  = fetch_klines(pair, "5m")
+        d15 = fetch_klines(pair, "15m")
+    except Exception as e:
+        return {"symbol": symbol, "error": f"Datenfehler: {e}"}
+
+    if len(d5) < 20 or len(d15) < 20:
+        return {"symbol": symbol, "error": "Zu wenig Daten"}
+
+    close5  = [c[3] for c in d5]
+    close15 = [c[3] for c in d15]
+    price = close5[-1]
+
+    # Veränderungen
+    ch5  = pct_change(close5[-1], close5[-2])
+    ch15 = pct_change(close15[-1], close15[-4])  # ~15m
+
+    # Indikatoren
+    r = rsi(close5, 14)
+    a = atr_pct(d5, 14)
 
     # Schwellen
-    min_rsi    = per_coin.get("min_rsi", DEFAULTS["min_rsi"])
-    min_change = per_coin.get("min_change", DEFAULTS["min_change"])
+    min_rsi   = th.get("min_rsi",   DEFAULTS["min_rsi"])
+    min_c5    = th.get("min_change_5m",  DEFAULTS["min_change_5m"])
+    min_c15   = th.get("min_change_15m", DEFAULTS["min_change_15m"])
+    min_atrp  = th.get("min_atr_pct",    DEFAULTS["min_atr_pct"])
 
-    # Textzeile
-    linestr = (
-        f"🟡 {sym}: {fmt_price(price)}"
-        f" • 5m {pct(ch5)}"
-        f" • 15m {pct(ch15)}"
-        f" • ATR% {atrp:.2f}"
-        f" • RSI {int(round(r))} — "
+    strong = (
+        (abs(ch5) >= min_c5 or abs(ch15) >= min_c15) and
+        (not math.isnan(r) and r >= min_rsi) and
+        (not math.isnan(a) and a >= min_atrp)
     )
 
-    # Signal-Logik (simpel & robust)
-    direction = 0
-    if r >= min_rsi and ch5 >= min_change:
-        direction = +1
-    elif r <= (100 - min_rsi) and ch5 <= -min_change:
-        direction = -1
+    return {
+        "symbol": symbol,
+        "price": price,
+        "chg5": ch5,
+        "chg15": ch15,
+        "rsi": r,
+        "atrp": a,
+        "strong": strong,
+    }
 
-    if direction == 0:
-        linestr += "HOLD"
-        return linestr, None
-
-    # Cooldown
-    now_ts = int(time.time())
-    last_alert_ts = state.get("coins", {}).get(sym, {}).get("last_alert", 0)
-    cooled = (now_ts - last_alert_ts) >= COOLDOWN_MIN * 60
-
-    emoji = "📈" if direction > 0 else "📉"
-    dirword = "BUY" if direction > 0 else "SELL"
-
-    if cooled:
-        linestr += f"{emoji} {dirword}"
-        alert_line = f"{emoji} {sym} — {dirword} • Preis {fmt_price(price)} • 5m {pct(ch5)} • RSI {int(round(r))}"
-        # state updaten
-        state.setdefault("coins", {}).setdefault(sym, {})["last_alert"] = now_ts
-    else:
-        mins = max(0, COOLDOWN_MIN - (now_ts - last_alert_ts)//60)
-        linestr += f"HOLD (Cooldown {mins}m)"
-
-    return linestr, alert_line
-
-# ========= Hauptlogik =========
-
-def write_text(path: str, text: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text.strip() + "\n")
+# ----------------------------
+# Main Build
+# ----------------------------
+def load_coins() -> List[Dict[str, Any]]:
+    coins = load_json("coins.json", [])
+    # Wenn keine Datei: Minimum-Set
+    if not coins:
+        coins = [{"symbol": s} for s in
+                 ("BTC","ETH","SOL","HBAR","XRP","SEI","KAS","RNDR","FET","SUI","AVAX","ADA","DOT")]
+    return coins
 
 def build_messages():
-    state = load_state()
     coins = load_coins()
+    state = load_json(STATE_PATH, {"last_alerts": {}})
+    now_ts = now_utc_ts()
 
-    header = (
-        f"📊 Signal Snapshot — {now_utc_str()}\n"
-        f"Basis: USD • Intervalle: 5m/15m •\n"
-        f"Quellen: BinanceUS → Bybit → OKX\n"
-    )
+    lines = []
+    alert_lines = []
 
-    lines: List[str] = []
-    alert_lines: List[str] = []
+    header = (f"📊 Signal Snapshot — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC\n"
+              f"Basis: {BASE} • Intervalle: 5m/15m •\n"
+              f"Quellen: BinanceUS → Bybit → OKX")
+    lines.append(header)
 
     for c in coins:
-        sym = c["symbol"].upper().strip()
-        l, a = analyze_coin(sym, c, state)
-        lines.append(l)
-        if a:
-            alert_lines.append(a)
+        sym = c["symbol"].upper()
+        th = {}
+        th.update(DEFAULTS)
+        # coin-spezifische Schwellen (optional in coins.json)
+        for k in ("min_rsi","min_change_5m","min_change_15m","min_atr_pct"):
+            if k in c: th[k] = c[k]
+
+        res = analyze_symbol(sym, th)
+        if "error" in res:
+            lines.append(f"🟡 {sym}: Datenfehler — HOLD")
+            continue
+
+        price = res["price"]
+        ch5, ch15 = res["chg5"], res["chg15"]
+        atrp, r = res["atrp"], res["rsi"]
+        strong = res["strong"]
+
+        # Cooldown-Check
+        last = state.get("last_alerts", {}).get(sym, 0)
+        mins_since = (time.time() - last) / 60.0
+
+        if strong and mins_since >= COOLDOWN_MIN:
+            msg = (f"🚀 {sym}: {fmt_price(price)} • 5m {ch5:+.2f}% • 15m {ch15:+.2f}% • "
+                   f"ATR% {atrp:.2f} • RSI {r:.0f} — ALERT")
+            alert_lines.append(msg)
+            state["last_alerts"][sym] = time.time()
+            lines.append("🟢 " + msg.replace("🚀 ", ""))   # im Snapshot grün
+        else:
+            cd_txt = ""
+            if strong and mins_since < COOLDOWN_MIN:
+                rest = int(COOLDOWN_MIN - mins_since)
+                cd_txt = f" (Cooldown {rest}m)"
+            lines.append(
+                f"🟡 {sym}: {fmt_price(price)} • 5m {ch5:+.2f}% • 15m {ch15:+.2f}% • "
+                f"ATR% {atrp:.2f} • RSI {r:.0f} — HOLD{cd_txt}"
+            )
+
+        # CSV optional loggen
+        append_csv_row(now_ts, sym, price, ch5, ch15, atrp, r)
 
     # Dateien schreiben
-    msg_text = header + "\n" + "\n".join(lines)
-    write_text(MSG_PATH, msg_text)
+    write_text(MSG_PATH, "\n".join(lines) + "\n")
+    write_text(ALERTS_PATH, "\n".join(alert_lines) + ("\n" if alert_lines else ""))
+    save_json(STATE_PATH, state)
 
-    alerts_text = "\n".join(alert_lines) if alert_lines else ""
-    write_text(ALERTS_PATH, alerts_text)
-
-    state["last_run"] = int(time.time())
-    save_state(state)
-
+# ----------------------------
+# Entry
+# ----------------------------
 def main():
     try:
         build_messages()
         print("message.txt + alerts.txt erzeugt.")
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"ERROR: {e}", flush=True)
         raise
 
 if __name__ == "__main__":
