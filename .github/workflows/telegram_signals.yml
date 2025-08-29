@@ -2,22 +2,20 @@ name: Telegram Signals
 
 on:
   workflow_dispatch: {}
-  # Optional (UTC!): Entkommentieren und anpassen, wenn du feste Zeiten willst
-  # schedule:
-  #   - cron: "00 03 * * *"   # 05:00 Berlin (im Winter UTC+1/2 beachten)
-  #   - cron: "00 08 * * *"   # 10:00
-  #   - cron: "30 12 * * *"   # 14:30
-  #   - cron: "00 16 * * *"   # 18:00
-  #   - cron: "00 20 * * *"   # 22:00
+  schedule:
+    # Berlin: 05:00, 10:00, 14:30, 18:00, 22:00 (UTC anpassen falls nötig)
+    - cron: "0 3 * * *"
+    - cron: "0 8 * * *"
+    - cron: "30 12 * * *"
+    - cron: "0 16 * * *"
+    - cron: "0 20 * * *"
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # damit push/commit erlaubt ist
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -28,58 +26,53 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas numpy python-dateutil pytz ta
+          pip install requests
 
       - name: Generate
         env:
-          COOLDOWN_MINUTES: "0"
+          COOLDOWN_MINUTES: "30"
+          BASE_QUOTE: "USDT"
+        run: python -u generate_message.py
+
+      - name: Show generated files
         run: |
-          set -euxo pipefail
-          python -u generate_message.py
-
-      # Falls dein Code (noch) keine CSV schreibt, legen wir eine mit Header an,
-      # damit der Commit-Step nie abbricht.
-      - name: Ensure log file exists
-        run: |
-          if [ ! -f signals_log.csv ]; then
-            echo "ts,symbol,action,reason" > signals_log.csv
-          fi
-
-      - name: Commit state/log (if changed)
-        run: |
-          set -euxo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          CHANGED=0
-          for f in signal_state.json signals_log.csv message.txt alerts.txt; do
-            if [ -f "$f" ]; then
-              git add "$f" || true
-              CHANGED=1
-            fi
-          done
-
-          if [ "$CHANGED" -eq 1 ]; then
-            git commit -m "Update generated artifacts [skip ci]" || echo "No changes to commit"
-            git push || true
-          else
-            echo "No files to commit"
-          fi
+          echo "----- message.txt -----"
+          cat message.txt || true
+          echo "----- alerts.txt -----"
+          cat alerts.txt || true
+          echo "----- state -----"
+          cat signal_state.json || true
 
       - name: Send to Telegram (main + alerts)
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          set -euxo pipefail
-          # Secrets prüfen – wenn fehlt, sauber überspringen
-          if [ -z "${TELEGRAM_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
-            echo "Missing TELEGRAM secrets, skipping send step."
-            exit 0
-          fi
-          # Optional: nur senden, wenn message.txt existiert
-          if [ -f message.txt ]; then
-            python -u telegram_send.py
+          python - <<'PY'
+          import os, json, requests, sys
+          token = os.environ["TELEGRAM_TOKEN"]
+          chat  = os.environ["TELEGRAM_CHAT_ID"]
+          def send(text):
+              url = f"https://api.telegram.org/bot{token}/sendMessage"
+              r = requests.post(url, json={"chat_id": chat, "text": text})
+              r.raise_for_status()
+          msg = open("message.txt","r",encoding="utf-8").read().strip()
+          if msg:
+              send(msg[:4096])
+          alerts = open("alerts.txt","r",encoding="utf-8").read().strip()
+          if alerts:
+              send("🚨 Alerts\n" + alerts[:4096])
+          PY
+
+      - name: Commit state (if changed)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Nur wenn sich etwas geändert hat
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "update: state/log $(date -u +'%F %T')"
+            git push
           else
-            echo "message.txt not found, skip sending."
+            echo "No changes to commit."
           fi
