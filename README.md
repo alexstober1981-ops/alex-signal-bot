@@ -1,65 +1,42 @@
 # 🤖 Alex Signal Bot
 
-Automatischer Krypto-Signalbot mit **Fallback-Marktdaten (BinanceUS → Bybit → OKX)**, adaptiven Schwellen (ATR%), Trend-Filtern (EMA 20/50), RSI, Cooldown und Telegram-Benachrichtigung.  
-Entwickelt für **Krypto-Profis**, die Stabilität, Zuverlässigkeit und klare Signale erwarten.
+Automatischer **Krypto-Signalbot** mit **Multi-Exchange-Daten, Fallback-Strategie** und robuster **Telegram-Integration**.  
+Entwickelt für **Krypto-Trader**, die Stabilität, Transparenz und professionelle Signalqualität erwarten.
 
 ---
 
-## 🚀 Features
-
-- 📊 **Multi-Exchange Daten**: BinanceUS → Bybit → OKX (3-fach Fallback, unkaputtbar)  
-- 🧮 **Indikatoren**: 5m/15m Change, EMA(20/50), RSI(14), ATR%  
-- 🎚 **Adaptive Schwellen**: passen sich Volatilität an (weniger Spam in High-Vol-Phasen)  
-- ⏱ **Cooldown pro Coin**: Standard 30min (überschreibbar per `COOLDOWN_MINUTES`)  
-- 📝 **Outputs**:  
-  - `message.txt` → kompakter Markt-Snapshot  
-  - `alerts.txt` → nur starke Signale  
-  - `signal_state.json` → interner Zustand (Cooldown, letzter Preis, Status)  
-- 🔔 **Telegram Integration**: alle Signale direkt in deinen Chat  
-- 🛡 **Stabilität & Sicherheit**: GitHub Secrets für API Keys, kein Klartext im Repo  
+## 🏆 Features (State of the Art)
+- 📊 **Multi-Exchange Fallback**: BinanceUS → Bybit → OKX  
+- 📉 **Indikatoren**: 5m/15m Change, EMA, RSI, ATR (erweiterbar)  
+- 🧠 **Adaptive Schwellen**: dynamische Anpassung an Marktvolatilität  
+- ⏱ **Cooldown pro Coin**: Anti-Spam, Standard 30min  
+- 📂 **Outputs**:
+  - `message.txt` → Markt-Snapshot  
+  - `alerts.txt` → starke Kauf-/Verkaufssignale  
+  - `signal_state.json` → interner Zustand / letzte Alerts  
+- 🔔 **Telegram-Integration**: Push-Nachrichten in Echtzeit  
+- 🛡 **Stabilität & Sicherheit**: GitHub Secrets + redundante Datenquellen  
+- 📈 **Optimiert für Trading-Profis** → skalierbar & erweiterbar
 
 ---
 
-## 🛡 Sicherheit
-
-- 🔑 **API Keys niemals im Code** – nur via GitHub **Secrets**  
-- 🗂 **Keine Speicherung privater Daten**  
-- 🧩 **3-fach Datenquelle** = hohe Ausfallsicherheit  
+## 🔐 Sicherheit
+- 🔑 **API Keys niemals im Code** – ausschließlich über GitHub Secrets  
+- 🛡 **Keine Speicherung sensibler Daten**  
+- ♻️ **3-fach Datenquelle** → hohe Ausfallsicherheit (Binance/Bybit/OKX)  
+- 📝 **Logging & State** → reproduzierbare Signale & Debugging
 
 ---
 
 ## ⚙️ Setup
-
-1. **Repository klonen oder forken**
-
-2. **GitHub Secrets anlegen** (Settings → Secrets and variables → Actions):
-   - `TELEGRAM_TOKEN` = BotFather-Token  
-   - `TELEGRAM_CHAT_ID` = deine Telegram-ChatID  
-
-3. **Automatische Workflows** (GitHub Actions):
-   - `telegram_signals.yml` → schickt Signals 5× täglich  
-   - `status_now.yml` → manuell starten für Sofort-Snapshot  
-   - `bot_poll.yml` → Polling für Commands in Telegram  
+1. Repository klonen oder forken  
+2. **GitHub Secrets** einrichten:
+   - `TELEGRAM_TOKEN` = BotFather Token  
+   - `TELEGRAM_CHAT_ID` = deine Telegram Chat-ID  
+3. Workflows:
+   - `.github/workflows/telegram_signals.yml` → geplanter Lauf (05:00, 10:00, 14:30, 18:00, 22:00 Berlin-Zeit)  
+   - `.github/workflows/status_now.yml` → sofortiger Run (manuell triggerbar)  
 
 ---
 
-## ⏰ Zeitplan (Berlin)
-
-- 05:00  
-- 10:00  
-- 14:30  
-- 18:00  
-- 22:00  
-
----
-
-## 📂 Dateien
-
-- `generate_message.py` → baut Markt-Signaltexte (Fallback + Indikatoren)  
-- `telegram_send.py` → sendet Textnachrichten an Telegram  
-- `bot_poll.py` → verarbeitet Telegram-Befehle (409-safe)  
-- `.github/workflows/*.yml` → Actions für Auto-Runs  
-
----
-
-## 📈 Beispiel-Output
+## 📂 Projektstruktur
