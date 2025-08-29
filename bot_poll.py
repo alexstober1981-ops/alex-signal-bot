@@ -1,153 +1,176 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Robustes Telegram-Polling für GitHub Actions:
+- Löscht Webhook (verhindert 409 Conflict)
+- Nutzt long polling (timeout 50s)
+- Persistiert last_update_id in Datei
+- Sauberes Retry/Logging
+Nur stdlib + requests.
+"""
+
 import os
 import json
 import time
+from typing import Optional, List, Dict, Any
+
 import requests
-from typing import Optional, Tuple
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
-DEFAULT_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-LAST_ID_FILE = "last_update_id"
+API_BASE = "https://api.telegram.org"
 
-API = f"https://api.telegram.org/bot{TOKEN}"
-TIMEOUT = 25
-SLEEP_BETWEEN = 1.5
+# --- Konfiguration per ENV (GitHub Secrets) ---
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")  # Fallback auf alten Namen
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHATID")
 
-def load_last_update_id() -> Optional[int]:
+# Pfad für Offset-Persistenz (Repo-Root in Actions)
+STATE_PATH = os.getenv("LAST_UPDATE_FILE", "last_update_id.txt")
+
+# Netzwerk/Retry
+HTTP_TIMEOUT = 20
+POLLING_TIMEOUT = 50      # long polling
+MAX_RETRIES = 2
+SLEEP_BETWEEN_RETRIES = 2
+
+
+# ---------- Hilfen ----------
+def _bot_url(method: str) -> str:
+    if not TOKEN:
+        raise RuntimeError("Fehlendes TOKEN (TELEGRAM_TOKEN).")
+    return f"{API_BASE}/bot{TOKEN}/{method}"
+
+
+def _load_last_update_id() -> Optional[int]:
     try:
-        with open(LAST_ID_FILE, "r", encoding="utf-8") as f:
-            return int(f.read().strip())
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+            return int(raw) if raw else None
+    except FileNotFoundError:
+        return None
     except Exception:
         return None
 
-def save_last_update_id(update_id: int) -> None:
-    try:
-        with open(LAST_ID_FILE, "w", encoding="utf-8") as f:
-            f.write(str(update_id))
-    except Exception:
-        pass
 
-def tg_call(method: str, *, params=None, json_=None, timeout=15) -> dict:
-    url = f"{API}/{method}"
-    r = requests.post(url, params=params, json=json_, timeout=timeout) if json_ else \
-        requests.get(url, params=params, timeout=timeout)
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("ok", False):
-        raise RuntimeError(f"Telegram {method} not ok: {data}")
-    return data
-
-def get_webhook_info() -> dict:
+def _save_last_update_id(value: int) -> None:
     try:
-        return tg_call("getWebhookInfo").get("result", {})
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            f.write(str(value))
     except Exception as e:
-        print(f"[INFO] getWebhookInfo fail: {e}")
-        return {}
+        print(f"[WARN] Konnte last_update_id nicht speichern: {e}")
 
-def clear_webhook_if_needed() -> None:
-    info = get_webhook_info()
-    url = (info or {}).get("url", "")
-    if url:
-        print(f"[INFO] Webhook gesetzt ({url}) -> lösche…")
-        tg_call("setWebhook", params={"url": ""}, timeout=20)
-        print("[INFO] Webhook entfernt.")
 
-def tg_get_updates(offset: Optional[int]) -> list:
-    params = {"timeout": TIMEOUT}
+# ---------- Telegram Low-Level ----------
+def tg_delete_webhook() -> None:
+    """Webhook löschen, um 409-Conflicts zu vermeiden (idempotent)."""
+    url = _bot_url("deleteWebhook")
+    try:
+        r = requests.get(url, timeout=HTTP_TIMEOUT)
+        # 200 mit ok:true erwartet – aber wir ignorieren bewusst Fehler,
+        # weil der Webhook evtl. nie gesetzt war.
+        print(f"[INFO] deleteWebhook status={r.status_code} body={r.text[:200]}")
+    except Exception as e:
+        print(f"[WARN] deleteWebhook: {e}")
+
+
+def tg_get_updates(offset: Optional[int]) -> List[Dict[str, Any]]:
+    """Long-Poll getUpdates mit Retry und 409-Heilung."""
+    params = {
+        "timeout": POLLING_TIMEOUT,
+        "allowed_updates": json.dumps(["message"])  # wir brauchen nur Nachrichten
+    }
     if offset is not None:
         params["offset"] = offset
-    r = requests.get(f"{API}/getUpdates", params=params, timeout=TIMEOUT + 5)
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("ok"):
-        raise RuntimeError(f"Telegram getUpdates not ok: {data}")
-    return data.get("result", [])
 
-def tg_send_message(text: str, chat_id: Optional[str] = None) -> None:
-    target = (chat_id or DEFAULT_CHAT).strip()
-    if not target:
-        print("[WARN] Kein TELEGRAM_CHAT_ID gesetzt – Nachricht wird nicht gesendet.")
-        return
-    payload = {"chat_id": target, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    tg_call("sendMessage", json_=payload, timeout=15)
+    last_err: Optional[Exception] = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = requests.get(_bot_url("getUpdates"), params=params, timeout=HTTP_TIMEOUT + POLLING_TIMEOUT)
+            if r.status_code == 409:
+                # Sicher ist sicher – Webhook löschen und 1x retryen
+                print("[WARN] 409 Conflict bei getUpdates – lösche Webhook & retry…")
+                tg_delete_webhook()
+                time.sleep(1)
+                continue
+            r.raise_for_status()
+            data = r.json()
+            if not data.get("ok", False):
+                raise RuntimeError(f"Telegram not ok: {data}")
+            return data.get("result", [])
+        except Exception as e:
+            last_err = e
+            print(f"[WARN] getUpdates attempt {attempt}/{MAX_RETRIES} failed: {e}")
+            time.sleep(SLEEP_BETWEEN_RETRIES)
+    # alle Versuche scheiterten
+    raise RuntimeError(f"getUpdates failed: {last_err}")
 
-def build_status_message() -> Tuple[str, dict]:
-    try:
-        from generate_message import build_message  # type: ignore
-        msg, state = build_message()
-        return msg, (state or {})
-    except Exception as e:
-        print(f"[INFO] Fallback build_status_message: {e}")
-        return "📊 Status: Bot ist online. (Fallback-Text)", {}
 
-def handle_command(cmd: str, chat_id: str) -> None:
-    cmd = cmd.strip().lower()
-    if cmd in ("/start", "/help"):
-        tg_send_message(
-            "👋 <b>Alex Signal Bot</b>\n"
-            "Befehle:\n"
-            "• /id – zeigt deine Chat-ID\n"
-            "• /status – Signal-Snapshot\n"
-            "• /ping – Test",
-            chat_id,
-        )
-    elif cmd == "/id":
-        tg_send_message(f"🆔 Deine Chat-ID: <code>{chat_id}</code>", chat_id)
-    elif cmd == "/ping":
-        tg_send_message("🏓 Pong!", chat_id)
-    elif cmd == "/status":
-        msg, _ = build_status_message()
-        tg_send_message(msg, chat_id)
-    else:
-        tg_send_message("❓ Unbekannter Befehl. Nutze /help.", chat_id)
-
-def main_once():
+def tg_send_message(chat_id: str, text: str, disable_web_page_preview: bool = True) -> None:
     if not TOKEN:
-        raise SystemExit("TELEGRAM_TOKEN fehlt (Env).")
+        raise RuntimeError("Fehlendes TOKEN (TELEGRAM_TOKEN).")
+    if not chat_id:
+        raise RuntimeError("Fehlende TELEGRAM_CHAT_ID.")
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": disable_web_page_preview,
+    }
+    r = requests.post(_bot_url("sendMessage"), data=payload, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
 
-    # >>> Fix für 409: Webhook entfernen, falls gesetzt
-    clear_webhook_if_needed()
 
-    offset = load_last_update_id()
-    print(f"[INFO] Starte Polling – offset={offset}")
+# ---------- Business-Logik ----------
+def handle_message(msg: Dict[str, Any]) -> None:
+    """Ganz schlanke Command-Handler – erweiterbar nach Bedarf."""
+    if "text" not in msg:
+        return
+    text: str = msg["text"].strip()
+    user = msg.get("from", {})
+    uname = user.get("username") or user.get("first_name") or "User"
 
-    # Versuch 1
-    try:
-        updates = tg_get_updates(offset)
-    except requests.HTTPError as e:
-        # Falls trotzdem 409 → noch einmal Webhook clearen und retry
-        if e.response is not None and e.response.status_code == 409:
-            print("[WARN] 409 Conflict bei getUpdates – lösche Webhook & retry…")
-            clear_webhook_if_needed()
-            updates = tg_get_updates(offset)  # Retry
-        else:
-            raise
+    if text.lower() in ("/start", "start"):
+        tg_send_message(CHAT_ID, f"👋 Hi {uname}! Ich bin online und lausche auf deine Kommandos.")
+    elif text.lower() in ("/ping", "ping"):
+        tg_send_message(CHAT_ID, "🏓 pong")
+    elif text.lower() in ("/help", "help"):
+        tg_send_message(CHAT_ID, "ℹ️ Verfügbar: /start, /ping, /help")
+    else:
+        # hier könntest du weitere Kommandos anbinden
+        print(f"[INFO] Unbekanntes Text-Event: {text!r}")
 
-    max_update_id = offset or 0
+
+def process_updates(updates: List[Dict[str, Any]], last_update_id: Optional[int]) -> Optional[int]:
+    """Events der Reihe nach verarbeiten und den neuesten update_id zurückgeben."""
+    newest = last_update_id
     for upd in updates:
-        max_update_id = max(max_update_id, upd.get("update_id", 0))
-        msg = upd.get("message") or upd.get("edited_message") or {}
-        text = (msg.get("text") or "").strip()
-        chat_id = str((msg.get("chat", {}) or {}).get("id", ""))
-        if not text or not chat_id:
+        uid = upd.get("update_id")
+        if uid is None:
             continue
-        if text.startswith("/"):
-            print(f"[INFO] Command von {chat_id}: {text}")
-            try:
-                handle_command(text.split()[0], chat_id)
-            except Exception as e:
-                print(f"[ERROR] handle_command: {e}")
-                tg_send_message("⚠️ Fehler bei der Verarbeitung des Befehls.", chat_id)
+        # Telegram-Events: uns interessieren nur Messages
+        msg = upd.get("message")
+        if msg:
+            handle_message(msg)
+        newest = uid
+    return newest
 
-    if max_update_id:
-        save_last_update_id(max_update_id + 1)
-        print(f"[INFO] last_update_id -> {max_update_id + 1}")
+
+def main_once() -> None:
+    print(f"[INFO] Starte Polling – offset={_load_last_update_id()}")
+    # Idempotent: erst Webhook entfernen
+    tg_delete_webhook()
+
+    offset = _load_last_update_id()
+    updates = tg_get_updates(offset)
+    if not updates:
+        print("[INFO] Keine neuen Updates.")
+        return
+
+    newest = process_updates(updates, offset)
+    # Beim nächsten Poll wollen wir NACH dem letzten Event starten
+    if newest is not None:
+        _save_last_update_id(newest + 1)
+        print(f"[INFO] last_update_id gespeichert: {newest + 1}")
+
 
 if __name__ == "__main__":
-    try:
-        main_once()
-    except requests.RequestException as e:
-        print(f"[ERROR] Netzwerkfehler: {e}")
-        raise
+    main_once()
