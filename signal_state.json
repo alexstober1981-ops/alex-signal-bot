@@ -129,7 +129,8 @@
     "HBAR": {
       "last_price": 0.22495,
       "last_ts": 0,
-      "last_status": "HOLD"
+      "last_status": "HOLD",
+      "last_alert": 1756499003
     },
     "XRP": {
       "last_price": 2.8057,
@@ -139,7 +140,8 @@
     "ADA": {
       "last_price": 0.813,
       "last_ts": 0,
-      "last_status": "HOLD"
+      "last_status": "HOLD",
+      "last_alert": 1756499006
     },
     "DOT": {
       "last_price": 3.725,
@@ -147,5 +149,5 @@
       "last_status": "HOLD"
     }
   },
-  "last_run": 1756498493
+  "last_run": 1756499006
 }
