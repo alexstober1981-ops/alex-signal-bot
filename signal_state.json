@@ -153,13 +153,13 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 0.0
+    "prev_rsi": 100.0
   },
   "ETH": {
-    "prev_rsi": 38.43774168600265
+    "prev_rsi": 30.076628352488612
   },
   "SOL": {
-    "prev_rsi": 51.72413793103296
+    "prev_rsi": 100.0
   },
   "AVAX": {
     "prev_rsi": 100.0
@@ -183,6 +183,6 @@
     "prev_rsi": 100.0
   },
   "XRP": {
-    "prev_rsi": 100.0
+    "prev_rsi": 0.0
   }
 }
