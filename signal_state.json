@@ -153,13 +153,13 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 1.2258772516800178
+    "prev_rsi": 8.520114942527968
   },
   "ETH": {
-    "prev_rsi": 23.743886171629626
+    "prev_rsi": 4.483430799220528
   },
   "SOL": {
-    "prev_rsi": 0.0
+    "prev_rsi": 23.888888888889113
   },
   "AVAX": {
     "prev_rsi": 0.0
@@ -168,21 +168,21 @@
     "prev_rsi": 100.0
   },
   "FET": {
-    "prev_rsi": 100.0
-  },
-  "SUI": {
-    "prev_rsi": 100.0
-  },
-  "ADA": {
     "prev_rsi": 50.0
   },
+  "SUI": {
+    "prev_rsi": 28.86597938144294
+  },
+  "ADA": {
+    "prev_rsi": 0.0
+  },
   "DOT": {
-    "prev_rsi": 100.0
+    "prev_rsi": 0.0
   },
   "HBAR": {
-    "prev_rsi": 100.0
+    "prev_rsi": 0.0
   },
   "XRP": {
-    "prev_rsi": 0.0
+    "prev_rsi": 10.169491525422956
   }
 }
