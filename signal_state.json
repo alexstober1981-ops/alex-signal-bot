@@ -182,22 +182,22 @@
     "last_side_ts": 1756917836
   },
   "ADA": {
-    "prev_rsi": 0.0,
+    "prev_rsi": 100.0,
     "last_side": "BUY",
     "last_side_ts": 1756820528
   },
   "DOT": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 0.0,
     "last_side": "SELL",
     "last_side_ts": 1756871019
   },
   "HBAR": {
-    "prev_rsi": 19.444444444440805,
+    "prev_rsi": 100.0,
     "last_side": "BUY",
     "last_side_ts": 1756844953
   },
   "XRP": {
-    "prev_rsi": 44.444444444448834,
+    "prev_rsi": 25.75757575757565,
     "last_side": "SELL",
     "last_side_ts": 1756820528
   },
