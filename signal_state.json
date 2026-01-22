@@ -153,12 +153,12 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 89.86662729465144,
+    "prev_rsi": 100.0,
     "last_side": "SELL",
     "last_side_ts": 1768494536
   },
   "ETH": {
-    "prev_rsi": 76.8642447418732,
+    "prev_rsi": 62.23146223146306,
     "last_side": "BUY",
     "last_side_ts": 1767500104
   },
@@ -201,7 +201,7 @@
     "last_side_ts": 1769013417
   },
   "XRP": {
-    "prev_rsi": 54.54545454545523,
+    "prev_rsi": 0.0,
     "last_side": "BUY",
     "last_side_ts": 1768335470
   },
