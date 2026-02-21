@@ -153,12 +153,12 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 65.86516574928447,
+    "prev_rsi": 79.77676428229381,
     "last_side": "SELL",
     "last_side_ts": 1770990064
   },
   "ETH": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 76.47058823529255,
     "last_side": "SELL",
     "last_side_ts": 1770990064
   },
@@ -191,12 +191,12 @@
     "last_side_ts": 1771594684
   },
   "DOT": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 30.00000000000017,
     "last_side": "SELL",
     "last_side_ts": 1771594684
   },
   "HBAR": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 0.0,
     "last_side": "SELL",
     "last_side_ts": 1771594684
   },
