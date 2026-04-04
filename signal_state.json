@@ -158,12 +158,12 @@
     "last_side_ts": 1773842246
   },
   "ETH": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 46.66666666666299,
     "last_side": "BUY",
     "last_side_ts": 1775138431
   },
   "SOL": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 0.0,
     "last_side": "BUY",
     "last_side_ts": 1775138432
   },
@@ -201,7 +201,7 @@
     "last_side_ts": 1775033916
   },
   "XRP": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 0.0,
     "last_side": "SELL",
     "last_side_ts": 1774446799
   },
