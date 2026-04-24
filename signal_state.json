@@ -153,7 +153,7 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 96.77697531529545,
+    "prev_rsi": 100.0,
     "last_side": "SELL",
     "last_side_ts": 1773842246
   },
@@ -163,7 +163,7 @@
     "last_side_ts": 1776835897
   },
   "SOL": {
-    "prev_rsi": 93.75000000000111,
+    "prev_rsi": 71.42857142857433,
     "last_side": "SELL",
     "last_side_ts": 1776501702
   },
@@ -181,7 +181,7 @@
     "last_side_ts": 1776977044
   },
   "SUI": {
-    "prev_rsi": 63.50364963503629,
+    "prev_rsi": 100.0,
     "last_side": "SELL",
     "last_side_ts": 1776867246
   },
