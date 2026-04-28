@@ -153,17 +153,17 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 81.0998386959839,
+    "prev_rsi": 87.09004174120439,
     "last_side": "SELL",
     "last_side_ts": 1773842246
   },
   "ETH": {
-    "prev_rsi": 74.5490981963932,
+    "prev_rsi": 100.0,
     "last_side": "BUY",
     "last_side_ts": 1776835897
   },
   "SOL": {
-    "prev_rsi": 76.08695652173732,
+    "prev_rsi": 100.0,
     "last_side": "BUY",
     "last_side_ts": 1777063139
   },
