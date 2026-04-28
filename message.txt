@@ -1,16 +1,16 @@
-📊 Signal Snapshot — 2026-04-27 20:54 UTC
+📊 Signal Snapshot — 2026-04-28 06:11 UTC
 Basis: USD • Intervalle: 5m/15m •
 Quellen: BinanceUS → Bybit → OKX
-🟡 BTC: $77,015.8500 • 5m +0.00% • 15m -0.03% • ATR% 0.01 • RSI 29 — HOLD
-🟡 ETH: $2,291.9100 • 5m -0.02% • 15m -0.07% • ATR% 0.01 • RSI 10 — HOLD
-🟡 SOL: $84.2200 • 5m -0.08% • 15m -0.13% • ATR% 0.01 • RSI 0 — HOLD
-🟡 AVAX: $9.1700 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
+🟡 BTC: $77,039.1900 • 5m +0.00% • 15m +0.13% • ATR% 0.01 • RSI 100 — HOLD
+🟡 ETH: $2,291.2300 • 5m +0.03% • 15m +0.11% • ATR% 0.01 • RSI 100 — HOLD
+🟡 SOL: $84.2600 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
+🟡 AVAX: $9.2200 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
 🟡 RNDR: $4.8180 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
-🟡 FET: $0.2059 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
-🟡 SUI: $0.9214 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
-🟡 ADA: $0.2452 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
-🟡 DOT: $1.2220 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
-🟡 HBAR: $0.0893 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
-🟡 XRP: $1.3940 • 5m +0.00% • 15m +0.04% • ATR% 0.00 • RSI 100 — HOLD
-🟡 SEI: $0.0643 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
+🟡 FET: $0.2037 • 5m +0.15% • 15m +0.15% • ATR% 0.01 • RSI 100 — HOLD
+🟡 SUI: $0.9351 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
+🟡 ADA: $0.2484 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
+🟡 DOT: $1.2430 • 5m +0.16% • 15m +0.16% • ATR% 0.01 • RSI 100 — HOLD
+🟡 HBAR: $0.0892 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
+🟡 XRP: $1.3976 • 5m +0.17% • 15m +0.10% • ATR% 0.02 • RSI 71 — HOLD
+🟡 SEI: $0.0644 • 5m +0.00% • 15m +0.00% • ATR% 0.00 • RSI 100 — HOLD
 🟡 KAS: Datenfehler — HOLD
