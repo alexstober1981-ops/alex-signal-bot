@@ -153,22 +153,22 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 45.27943335924678,
+    "prev_rsi": 35.17093508040385,
     "last_side": "BUY",
     "last_side_ts": 1779568811
   },
   "ETH": {
-    "prev_rsi": 48.5327313769755,
+    "prev_rsi": 26.193467336684435,
     "last_side": "SELL",
     "last_side_ts": 1780673589
   },
   "SOL": {
-    "prev_rsi": 29.7297297297292,
+    "prev_rsi": 28.571428571428868,
     "last_side": "SELL",
     "last_side_ts": 1780866214
   },
   "AVAX": {
-    "prev_rsi": 33.33333333333333,
+    "prev_rsi": 0.0,
     "last_side": "BUY",
     "last_side_ts": 1780755327
   },
@@ -176,32 +176,32 @@
     "prev_rsi": 100.0
   },
   "FET": {
-    "prev_rsi": 41.37931034482762,
+    "prev_rsi": 0.0,
     "last_side": "SELL",
     "last_side_ts": 1780673589
   },
   "SUI": {
-    "prev_rsi": 68.47826086956502,
+    "prev_rsi": 0.0,
     "last_side": "SELL",
     "last_side_ts": 1780906694
   },
   "ADA": {
-    "prev_rsi": 0.0,
+    "prev_rsi": 13.168724279835757,
     "last_side": "BUY",
     "last_side_ts": 1780827888
   },
   "DOT": {
-    "prev_rsi": 100.0,
+    "prev_rsi": 0.0,
     "last_side": "SELL",
     "last_side_ts": 1780236984
   },
   "HBAR": {
-    "prev_rsi": 52.17391304347747,
+    "prev_rsi": 100.0,
     "last_side": "BUY",
     "last_side_ts": 1780673590
   },
   "XRP": {
-    "prev_rsi": 52.22222222222318,
+    "prev_rsi": 1.4705882352939312,
     "last_side": "BUY",
     "last_side_ts": 1780921463
   },
