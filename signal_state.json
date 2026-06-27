@@ -153,7 +153,7 @@
   },
   "last_run": 1756499592,
   "BTC": {
-    "prev_rsi": 99.95196926032993,
+    "prev_rsi": 29.046563192891966,
     "last_side": "BUY",
     "last_side_ts": 1782486507
   },
@@ -168,7 +168,7 @@
     "last_side_ts": 1782486508
   },
   "AVAX": {
-    "prev_rsi": 68.7500000000007,
+    "prev_rsi": 100.0,
     "last_side": "SELL",
     "last_side_ts": 1782486508
   },
@@ -196,7 +196,7 @@
     "last_side_ts": 1782135038
   },
   "HBAR": {
-    "prev_rsi": 64.58333333333405,
+    "prev_rsi": 41.509433962264644,
     "last_side": "BUY",
     "last_side_ts": 1781698338
   },
